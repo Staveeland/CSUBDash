@@ -263,6 +263,137 @@ tbody tr:hover { background:var(--green-50); }
 .delay-3 { animation-delay:.15s; }
 .delay-4 { animation-delay:.2s; }
 .delay-5 { animation-delay:.25s; }
+
+/* ====== RESPONSIVE: TABLET (max 1024px) ====== */
+@media (max-width: 1024px) {
+  .header { padding:0 24px; }
+  .search-container { padding:16px 24px 0; }
+  .main { padding:16px 24px 32px; }
+
+  .kpi-row { grid-template-columns: repeat(3, 1fr); }
+  .visual-overview { grid-template-columns: 1fr 1fr; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr; }
+  .company-grid-primary { grid-template-columns: repeat(2, 1fr); }
+  .company-grid-secondary { grid-template-columns: repeat(2, 1fr); }
+  .company-grid-tertiary { grid-template-columns: repeat(2, 1fr); }
+  .card { padding:20px; }
+}
+
+/* ====== RESPONSIVE: MOBILE (max 768px) ====== */
+@media (max-width: 768px) {
+  .header { height:auto; padding:12px 16px; flex-direction:column; align-items:flex-start; gap:8px; }
+  .header-left { flex-direction:column; align-items:flex-start; gap:4px; }
+  .logo-sub { border-left:none; padding-left:0; }
+  .header-right { width:100%; justify-content:flex-end; }
+  .lang-toggle { display:none; }
+
+  .search-container { padding:12px 16px 0; }
+  .search-bar { max-width:100%; }
+  .search-bar input { padding:12px 16px 12px 44px; font-size:14px; }
+  .ai-badge { padding:3px 8px; font-size:10px; }
+
+  .main { padding:12px 16px 24px; }
+
+  .kpi-row { grid-template-columns: 1fr; gap:12px; }
+  .kpi { padding:16px; }
+  .kpi-value { font-size:28px; }
+
+  .pipeline { overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:8px; }
+  .pipeline-step { min-width:120px; flex-shrink:0; padding:12px 8px; }
+  .pipeline-arrow { min-width:20px; flex-shrink:0; }
+
+  .visual-overview { grid-template-columns:1fr; }
+  .grid-2 { grid-template-columns:1fr; }
+  .grid-3 { grid-template-columns:1fr; }
+
+  .donut-container { flex-direction:column; align-items:center; gap:16px; }
+  .donut-svg { width:140px; height:140px; }
+
+  .company-grid-primary { grid-template-columns:1fr; }
+  .company-grid-secondary { grid-template-columns:1fr; }
+  .company-grid-tertiary { grid-template-columns:1fr; }
+
+  .toolbar { gap:8px; }
+  .filter-btn, .sort-btn { padding:10px 16px; font-size:13px; min-height:44px; }
+  .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table { min-width:700px; }
+  td, th { padding:10px 8px; font-size:12px; }
+
+  .world-map { height:200px; }
+  .map-bubble { transform:scale(.8); }
+  .map-bubble:hover { transform:scale(.9); }
+
+  .depth-chart { height:100px; margin-bottom:28px; }
+
+  .timeline { padding:16px 0 32px; }
+  .timeline-month { min-width:70px; }
+
+  .forecast-chart { height:100px; }
+
+  /* Drawer full-screen on mobile */
+  .drawer { width:100%; max-width:100%; }
+  .drawer-header { padding:16px; }
+  .drawer-body { padding:16px; }
+  .drawer-close { font-size:28px; padding:8px 12px; min-width:44px; min-height:44px; }
+
+  .card { padding:16px; border-radius:var(--radius-sm); }
+
+  /* Touch targets */
+  .filter-btn, .sort-btn, .lang-btn, .drawer-status-btn, tr { min-height:44px; }
+  .news-item { padding:16px 0; }
+
+  /* Prevent horizontal overflow */
+  html, body { overflow-x:hidden; }
+}
+
+/* ====== RESPONSIVE: SMALL PHONES (max 480px) ====== */
+@media (max-width: 480px) {
+  .header { padding:10px 12px; }
+  .logo { font-size:22px; }
+  .logo-sub { font-size:11px; }
+  .user-area { padding:4px 10px; font-size:12px; }
+  .user-avatar { width:24px; height:24px; font-size:10px; }
+
+  .search-container { padding:8px 12px 0; }
+  .main { padding:8px 12px 20px; }
+
+  .kpi-row { gap:8px; }
+  .kpi { padding:14px; }
+  .kpi-value { font-size:24px; }
+  .kpi-label { font-size:11px; }
+
+  .pipeline-step { min-width:100px; }
+  .pipeline-step .step-count { font-size:22px; }
+  .pipeline-step .step-label { font-size:10px; }
+
+  .card { padding:12px; }
+  .card-title { font-size:12px; margin-bottom:12px; }
+
+  .section-header h3 { font-size:14px; }
+
+  .donut-svg { width:120px; height:120px; }
+
+  .drawer-header h3 { font-size:16px; }
+
+  table { min-width:600px; }
+  td, th { padding:8px 6px; font-size:11px; }
+
+  .world-map { height:160px; }
+  .map-bubble .pct { font-size:12px; }
+  .map-bubble .region-name { font-size:7px; }
+
+  .forecast-chart { height:80px; }
+  .bar-chart { height:120px; }
+
+  .news-title { font-size:12px; }
+  .news-meta { font-size:10px; }
+
+  .drop-zone { padding:24px; }
+  .drop-icon { font-size:28px; }
+  .drop-text { font-size:13px; }
+  .drop-sub { font-size:11px; }
+}
 </style>
 </head>
 <body>
