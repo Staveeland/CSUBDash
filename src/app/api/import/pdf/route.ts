@@ -68,7 +68,7 @@ Extract EVERY row from ALL pages. Return ONLY the JSON array, no other text.`,
         },
       ],
       temperature: 0,
-      max_tokens: 16000,
+      max_completion_tokens: 16000,
     })
 
     const content = response.choices[0]?.message?.content || '[]'
