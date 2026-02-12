@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 interface ImportBatch {
   id: string
@@ -63,7 +64,7 @@ function UploadZone({ title, description, endpoint }: { title: string; descripti
 
   return (
     <div className="border rounded-lg p-6 bg-white shadow-sm">
-      <h3 className="text-lg font-semibold mb-2">{title}</h3>
+      <h3 className="text-lg font-semibold mb-2 text-slate-800">{title}</h3>
       <p className="text-sm text-gray-500 mb-4">{description}</p>
 
       <div
@@ -86,7 +87,7 @@ function UploadZone({ title, description, endpoint }: { title: string; descripti
       >
         {file ? (
           <div>
-            <p className="font-medium">{file.name}</p>
+            <p className="font-medium text-slate-700">{file.name}</p>
             <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
           </div>
         ) : (
@@ -123,14 +124,32 @@ function UploadZone({ title, description, endpoint }: { title: string; descripti
 
 export default function ImportPage() {
   const [batches, setBatches] = useState<ImportBatch[]>([])
+  const supabaseRef = useRef(createClient())
 
   useEffect(() => {
+    // Initial fetch
     fetch('/api/import/status').then(r => r.json()).then(setBatches).catch(() => {})
+
+    // Subscribe to realtime updates on import_batches
+    const channel = supabaseRef.current
+      .channel('import-status')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'import_batches' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setBatches(prev => [payload.new as ImportBatch, ...prev])
+        } else if (payload.eventType === 'UPDATE') {
+          setBatches(prev => prev.map(b => b.id === (payload.new as ImportBatch).id ? payload.new as ImportBatch : b))
+        }
+      })
+      .subscribe()
+
+    return () => {
+      supabaseRef.current.removeChannel(channel)
+    }
   }, [])
 
   return (
     <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-2xl font-bold mb-6">Data Import</h1>
+      <h1 className="text-2xl font-bold mb-6 text-slate-200">Data Import</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <UploadZone
@@ -150,40 +169,41 @@ export default function ImportPage() {
         />
       </div>
 
-      <h2 className="text-xl font-semibold mb-4">Recent Imports</h2>
+      <h2 className="text-xl font-semibold mb-4 text-slate-200">Recent Imports</h2>
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
-            <tr className="bg-gray-50">
-              <th className="text-left p-2 border">File</th>
-              <th className="text-left p-2 border">Type</th>
-              <th className="text-left p-2 border">Status</th>
-              <th className="text-right p-2 border">Total</th>
-              <th className="text-right p-2 border">Imported</th>
-              <th className="text-right p-2 border">Skipped</th>
-              <th className="text-left p-2 border">Date</th>
+            <tr className="bg-slate-800">
+              <th className="text-left p-2 border border-slate-700 text-slate-300">File</th>
+              <th className="text-left p-2 border border-slate-700 text-slate-300">Type</th>
+              <th className="text-left p-2 border border-slate-700 text-slate-300">Status</th>
+              <th className="text-right p-2 border border-slate-700 text-slate-300">Total</th>
+              <th className="text-right p-2 border border-slate-700 text-slate-300">Imported</th>
+              <th className="text-right p-2 border border-slate-700 text-slate-300">Skipped</th>
+              <th className="text-left p-2 border border-slate-700 text-slate-300">Date</th>
             </tr>
           </thead>
           <tbody>
             {batches.map(b => (
-              <tr key={b.id} className="hover:bg-gray-50">
-                <td className="p-2 border truncate max-w-[200px]">{b.file_name}</td>
-                <td className="p-2 border">{b.file_type}</td>
-                <td className="p-2 border">
+              <tr key={b.id} className="hover:bg-slate-800/50">
+                <td className="p-2 border border-slate-700 truncate max-w-[200px] text-slate-300">{b.file_name}</td>
+                <td className="p-2 border border-slate-700 text-slate-300">{b.file_type}</td>
+                <td className="p-2 border border-slate-700">
                   <span className={`px-2 py-0.5 rounded text-xs ${
-                    b.status === 'completed' ? 'bg-green-100 text-green-800' :
-                    b.status === 'failed' ? 'bg-red-100 text-red-800' :
-                    'bg-yellow-100 text-yellow-800'
+                    b.status === 'completed' ? 'bg-green-600/20 text-green-400' :
+                    b.status === 'failed' ? 'bg-red-600/20 text-red-400' :
+                    b.status === 'processing' ? 'bg-yellow-600/20 text-yellow-400 animate-pulse' :
+                    'bg-slate-600/20 text-slate-400'
                   }`}>{b.status}</span>
                 </td>
-                <td className="p-2 border text-right">{b.records_total}</td>
-                <td className="p-2 border text-right">{b.records_imported}</td>
-                <td className="p-2 border text-right">{b.records_skipped}</td>
-                <td className="p-2 border">{new Date(b.created_at).toLocaleDateString()}</td>
+                <td className="p-2 border border-slate-700 text-right text-slate-300">{b.records_total}</td>
+                <td className="p-2 border border-slate-700 text-right text-slate-300">{b.records_imported}</td>
+                <td className="p-2 border border-slate-700 text-right text-slate-300">{b.records_skipped}</td>
+                <td className="p-2 border border-slate-700 text-slate-300">{new Date(b.created_at).toLocaleDateString()}</td>
               </tr>
             ))}
             {batches.length === 0 && (
-              <tr><td colSpan={7} className="p-4 text-center text-gray-400">No imports yet</td></tr>
+              <tr><td colSpan={7} className="p-4 text-center text-slate-500">No imports yet</td></tr>
             )}
           </tbody>
         </table>
