@@ -23,6 +23,12 @@ interface ImportResult {
   imported?: number
   skipped?: number
   error?: string
+  detected_type?: string
+  report_period?: string
+  summary_length?: number
+  forecasts_extracted?: number
+  forecasts_imported?: number
+  key_figures?: Record<string, unknown>
 }
 
 function UploadZone({ title, description, endpoint }: { title: string; description: string; endpoint: string }) {
@@ -103,6 +109,8 @@ function UploadZone({ title, description, endpoint }: { title: string; descripti
               <p className="font-medium">✅ Import complete</p>
               {result.stats && <p>Total: {result.stats.total} | Imported: {result.stats.imported} | Skipped: {result.stats.skipped}</p>}
               {result.rows_extracted !== undefined && <p>Rows extracted: {result.rows_extracted} | Imported: {result.imported} | Skipped: {result.skipped}</p>}
+              {result.detected_type && <p>Auto-detected: {result.detected_type}</p>}
+              {result.report_period && <p>Report: {result.report_period} | Summary: {result.summary_length} chars | Forecasts: {result.forecasts_extracted} extracted, {result.forecasts_imported} saved</p>}
             </div>
           ) : (
             <p>❌ {result.error}</p>
@@ -124,16 +132,21 @@ export default function ImportPage() {
     <div className="max-w-4xl mx-auto p-8">
       <h1 className="text-2xl font-bold mb-6">Data Import</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <UploadZone
           title="Rystad Excel (Forecast/EPC)"
           description="Upload XMTs, Surf lines, Subsea Units and Upcoming awards Excel file"
           endpoint="/api/import/excel"
         />
         <UploadZone
-          title="Rystad PDF (Contract Awards)"
-          description="Upload OFS Contract Updates PDF for AI extraction"
-          endpoint="/api/import/pdf"
+          title="PDF (Auto-detect)"
+          description="Upload any PDF — auto-detects Contract Updates vs Market Reports"
+          endpoint="/api/import/auto"
+        />
+        <UploadZone
+          title="Market Reports"
+          description="Upload Subsea Market Report PDFs for AI summary & forecast extraction"
+          endpoint="/api/import/report"
         />
       </div>
 
