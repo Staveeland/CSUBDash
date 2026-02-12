@@ -15,6 +15,7 @@ interface ContractRow {
   scope: string
   region: string
   segment: string
+  duration: string
 }
 
 export async function POST(request: NextRequest) {
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
             } as unknown as OpenAI.Chat.Completions.ChatCompletionContentPartText,
             {
               type: 'text',
-              text: `Extract ALL contract rows from this PDF table. The table has columns: Leverandør (supplier), Operatør (operator), Verdi (value), Omfang (scope), Region/Prosjekt (region/project), Segment.
+              text: `Extract ALL contract rows from this PDF table. The table has columns: Leverandør (supplier), Operatør (operator), Verdi (value), Omfang (scope), Region/Prosjekt (region/project), Segment, and Varighet (duration/contract period).
 
 Return a JSON array of objects with these exact fields:
 - supplier: string
@@ -61,6 +62,7 @@ Return a JSON array of objects with these exact fields:
 - scope: string (full description)
 - region: string
 - segment: string
+- duration: string (contract duration/period, e.g. "2025-2028", "3 years", "36 months". Empty string if not found)
 
 Extract EVERY row from ALL pages. Return ONLY the JSON array, no other text.`,
             },
@@ -82,7 +84,7 @@ Extract EVERY row from ALL pages. Return ONLY the JSON array, no other text.`,
       supplier: r.supplier || 'Unknown',
       operator: r.operator || 'Unknown',
       project_name: r.region || 'Unknown',
-      description: r.scope || '',
+      description: [r.scope, r.duration ? `Varighet: ${r.duration}` : ''].filter(Boolean).join(' | ') || '',
       contract_type: mapSegment(r.segment),
       region: r.region,
       source: 'rystad_awards' as const,

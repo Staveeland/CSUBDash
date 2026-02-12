@@ -19,6 +19,12 @@ async function upsertChunked(supabase: ReturnType<typeof createAdminClient>, tab
   return { imported, updated, skipped }
 }
 
+function findSheet(workbook: XLSX.WorkBook, ...prefixes: string[]): string | undefined {
+  return workbook.SheetNames.find(name =>
+    prefixes.some(p => name.toLowerCase().startsWith(p.toLowerCase()))
+  )
+}
+
 function parseSheet(workbook: XLSX.WorkBook, sheetName: string): Record<string, unknown>[] {
   const sheet = workbook.Sheets[sheetName]
   if (!sheet) return []
@@ -135,8 +141,9 @@ export async function POST(request: NextRequest) {
     stats.imported += subseaResult.imported
     stats.skipped += subseaResult.skipped
 
-    // 4. Upcoming awards sheet
-    const awardRows = parseSheet(workbook, 'Upcomming awards').map(r => ({
+    // 4. Upcoming awards sheet (fuzzy match — sheet name includes date suffix)
+    const awardsSheetName = findSheet(workbook, 'Upcomming awards', 'Upcoming awards') || 'Upcomming awards'
+    const awardRows = parseSheet(workbook, awardsSheetName).map(r => ({
       import_batch_id: batchId,
       year: int((r as Record<string, unknown>)['Year']),
       country: str((r as Record<string, unknown>)['Country']),
