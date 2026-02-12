@@ -902,6 +902,157 @@ function setDrawerStatus(btn,status) {
 }
 
 renderTable();
+
+// ===== LIVE DATA FETCHING =====
+(async function loadRealData() {
+  const fetchJSON = url => fetch(url, { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+  const [stats, charts, companies, projects] = await Promise.all([
+    fetchJSON('/api/dashboard/stats'),
+    fetchJSON('/api/dashboard/charts'),
+    fetchJSON('/api/dashboard/companies'),
+    fetchJSON('/api/dashboard/projects'),
+  ]);
+
+  // === KPI CARDS ===
+  if (stats) {
+    const kpis = document.querySelectorAll('.kpi');
+    const kpiMap = [
+      { label: 'Aktive kontrakter', value: stats.totalProjects ?? '—', change: '' },
+      { label: 'Total SURF km', value: (stats.totalSurfKm ?? 0) + ' km', change: '' },
+      { label: 'Nye siste 30d', value: stats.upcomingAwards ?? '—', change: '' },
+      { label: 'Totale XMTs', value: stats.totalXmts ?? '—', change: '' },
+      { label: 'Regioner', value: stats.regionCount ?? '—', change: '' },
+    ];
+    kpiMap.forEach((k, i) => {
+      if (kpis[i]) {
+        kpis[i].querySelector('.kpi-label').textContent = k.label;
+        kpis[i].querySelector('.kpi-value').textContent = k.value;
+        kpis[i].querySelector('.kpi-change').textContent = k.change;
+      }
+    });
+  }
+
+  // === CHARTS: Regional donut ===
+  if (charts && charts.byCountry) {
+    const regionDonut = document.querySelectorAll('.visual-overview .card')[1];
+    if (regionDonut) {
+      const entries = charts.byCountry.slice(0, 5);
+      const total = entries.reduce((s, e) => s + (e.count || 0), 0);
+      const circumference = 2 * Math.PI * 60; // ~377
+      const colors = ['var(--green-800)', 'var(--green-500)', 'var(--green-300)', 'var(--gold)', 'var(--gold-light)'];
+      let offset = 0;
+      let circles = `<circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-100)" stroke-width="24"/>`;
+      let legend = '';
+      entries.forEach((e, i) => {
+        const pct = total > 0 ? e.count / total : 0;
+        const len = pct * circumference;
+        circles += `<circle cx="80" cy="80" r="60" fill="none" stroke="${colors[i]}" stroke-width="24"
+          stroke-dasharray="${len.toFixed(1)} ${(circumference - len).toFixed(1)}" stroke-dashoffset="${(-offset).toFixed(1)}" transform="rotate(-90 80 80)"/>`;
+        offset += len;
+        legend += `<div class="donut-legend-item"><div class="donut-legend-color" style="background:${colors[i]}"></div>${e.country || e.name}<span class="donut-legend-value">${total > 0 ? Math.round(pct * 100) : 0}%</span></div>`;
+      });
+      circles += `<text x="80" y="76" text-anchor="middle" font-family="IBM Plex Mono" font-size="18" font-weight="600" fill="var(--green-800)">${entries.length}</text>`;
+      circles += `<text x="80" y="94" text-anchor="middle" font-family="Source Sans 3" font-size="10" fill="var(--text-secondary)">REGIONER</text>`;
+      const svg = regionDonut.querySelector('.donut-svg');
+      if (svg) svg.innerHTML = circles;
+      const leg = regionDonut.querySelector('.donut-legend');
+      if (leg) leg.innerHTML = legend || '<div>Ingen data</div>';
+    }
+  }
+
+  // === COMPANY CARDS: Contractors (Installasjonsselskaper) ===
+  if (companies) {
+    const contractors = companies.contractors || companies.surfContractors || [];
+    const contractorGrid = document.querySelector('.company-grid-primary');
+    if (contractorGrid && contractors.length > 0) {
+      const maxCount = Math.max(...contractors.map(c => c.count || 0), 1);
+      contractorGrid.innerHTML = contractors.map(c => `
+        <div class="company-card company-card-primary">
+          <div class="company-name">${c.name}</div>
+          <div class="company-count">${c.count || 0}</div>
+          <div class="company-label">kontrakter</div>
+          <div class="company-bar"><div class="company-bar-fill" style="width:${((c.count || 0) / maxCount * 100).toFixed(0)}%"></div></div>
+        </div>
+      `).join('');
+      // Update badge
+      const badge = contractorGrid.closest('.card')?.querySelector('.section-badge');
+      if (badge) badge.textContent = contractors.length + ' selskaper';
+    }
+
+    // Operators
+    const operators = companies.operators || [];
+    const operatorGrid = document.querySelector('.company-grid-tertiary');
+    if (operatorGrid && operators.length > 0) {
+      operatorGrid.innerHTML = operators.map(o => `
+        <div class="company-card company-card-tertiary">
+          <span class="company-name">${o.name}</span>
+          <span class="company-count">${o.count || 0}</span>
+        </div>
+      `).join('');
+    }
+  }
+
+  // === PROJECT TABLE ===
+  if (projects && Array.isArray(projects) && projects.length > 0) {
+    // Replace the contracts array and re-render
+    contracts.length = 0;
+    projects.forEach(p => {
+      contracts.push({
+        date: p.award_date || p.created_at || '—',
+        supplier: p.surf_contractor || '—',
+        operator: p.operator || '—',
+        project: p.development_project || p.name || '—',
+        relevance: 'med',
+        region: p.country || '—',
+        country: p.country || '—',
+        type: 'subsea',
+        age: 0,
+        status: 'Ny',
+        handler: '—',
+        waterDepth: p.water_depth || '—',
+        xmts: p.xmts || 0,
+        surfKm: p.surf_km || 0,
+      });
+    });
+
+    // Update table headers for project data
+    const thead = document.querySelector('.card.full-width table thead tr');
+    if (thead) {
+      thead.innerHTML = `
+        <th>Prosjekt</th>
+        <th>Land</th>
+        <th>Operatør</th>
+        <th>SURF Contractor</th>
+        <th>Vanndybde</th>
+        <th>XMTs</th>
+        <th>SURF km</th>
+      `;
+    }
+
+    // Override renderTable for new columns
+    const origRender = renderTable;
+    window.renderTable = function() {
+      let data = [...contracts];
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        data = data.filter(c => Object.values(c).some(v => String(v).toLowerCase().includes(q)));
+      }
+      const tb = document.getElementById('contractTable');
+      tb.innerHTML = data.map((c, i) => `<tr onclick="openDrawer(${i})">
+        <td><strong>${c.project}</strong></td>
+        <td>${c.country}</td>
+        <td>${c.operator}</td>
+        <td>${c.supplier}</td>
+        <td class="mono">${c.waterDepth}</td>
+        <td class="mono">${c.xmts}</td>
+        <td class="mono">${c.surfKm}</td>
+      </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-secondary)">Ingen data</td></tr>';
+    };
+    renderTable();
+  }
+
+})();
 </script>
 </body>
 </html>
