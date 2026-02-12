@@ -5,7 +5,7 @@ export async function GET() {
   const supabase = createAdminClient()
 
   // Use projects table (has data) for all chart aggregations
-  const { data: projects } = await supabase.from('projects').select('facility_category, continent, first_year, xmt_count')
+  const { data: projects } = await supabase.from('projects').select('facility_category, continent, country, first_year, xmt_count')
 
   const rows = projects ?? []
 
@@ -40,5 +40,15 @@ export async function GET() {
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count)
 
-  return NextResponse.json({ facilityDistribution, yearlyTrend, continentDistribution })
+  // Country distribution (for map)
+  const countryMap: Record<string, number> = {}
+  rows.forEach(r => {
+    const k = r.country || 'Ukjent'
+    countryMap[k] = (countryMap[k] || 0) + 1
+  })
+  const byCountry = Object.entries(countryMap)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+
+  return NextResponse.json({ facilityDistribution, yearlyTrend, continentDistribution, byCountry })
 }
