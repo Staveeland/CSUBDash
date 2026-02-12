@@ -1,0 +1,27 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { processImportJob } from '@/lib/import/processors'
+
+export const runtime = 'nodejs'
+export const maxDuration = 300
+
+export async function POST(request: NextRequest) {
+  const expectedSecret = process.env.IMPORT_WORKER_SECRET
+  if (expectedSecret && request.headers.get('x-import-secret') !== expectedSecret) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    const body = await request.json()
+    const jobId = body?.job_id as string | undefined
+
+    if (!jobId) {
+      return NextResponse.json({ error: 'Missing job_id' }, { status: 400 })
+    }
+
+    const result = await processImportJob(jobId)
+    return NextResponse.json({ success: true, job_id: jobId, ...result })
+  } catch (error) {
+    console.error('Import processor error:', error)
+    return NextResponse.json({ error: String(error) }, { status: 500 })
+  }
+}
