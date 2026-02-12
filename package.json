@@ -11,10 +11,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3",
-    "@tanstack/react-table": "^8.21.3",
-    "@tanstack/react-virtual": "^3.13.18",
     "next": "16.1.6",
-    "nuqs": "^2.8.8",
     "openai": "^6.21.0",
     "pdf-parse": "^2.4.5",
     "react": "19.2.3",
