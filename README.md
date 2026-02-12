@@ -10,6 +10,13 @@ Built by [Workflows AS](https://workflows.no) for CSUB AS.
 - **AI:** Claude API (news parsing, relevance scoring)
 - **Hosting:** Vercel
 
+## ⚠️ DESIGN RULES
+- The dashboard design is in `public/dashboard.html` — this is the ONLY approved design
+- `src/components/Dashboard.tsx` is the React version of that design
+- **NEVER** create new dashboard layouts or replace the existing design
+- All improvements must work WITHIN the existing design, not replace it
+- When refactoring: preserve all CSS classes, layout structure, and visual appearance exactly
+
 ## Getting Started
 
 1. Clone the repo
