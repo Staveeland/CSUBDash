@@ -262,6 +262,8 @@ tbody tr:hover { background:var(--green-50); }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--green-300); border-radius:3px; }
 
+.loading-placeholder { color: var(--text-secondary); font-size: 13px; padding: 20px; text-align: center; animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity:.4; } 50% { opacity:1; } }
 @keyframes fadeInUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
 .animate { animation: fadeInUp .5s ease forwards; }
 .delay-1 { animation-delay:.05s; }
@@ -432,29 +434,29 @@ tbody tr:hover { background:var(--green-50); }
 <!-- KPI CARDS -->
 <div class="kpi-row">
   <div class="kpi animate delay-1">
-    <div class="kpi-label">Totale kontrakter</div>
-    <div class="kpi-value">247</div>
-    <div class="kpi-change">↑ 12% vs forrige kvartal</div>
+    <div class="kpi-label">Aktive kontrakter</div>
+    <div class="kpi-value">—</div>
+    <div class="kpi-change"></div>
   </div>
   <div class="kpi animate delay-2">
-    <div class="kpi-label">Leverandører</div>
-    <div class="kpi-value">38</div>
-    <div class="kpi-change">↑ 3 nye denne mnd</div>
+    <div class="kpi-label">Total SURF km</div>
+    <div class="kpi-value">—</div>
+    <div class="kpi-change"></div>
   </div>
   <div class="kpi animate delay-3">
-    <div class="kpi-label">Operatører</div>
-    <div class="kpi-value">24</div>
-    <div class="kpi-change">↑ 2 nye sist uke</div>
+    <div class="kpi-label">Nye siste 30d</div>
+    <div class="kpi-value">—</div>
+    <div class="kpi-change"></div>
   </div>
   <div class="kpi animate delay-4">
-    <div class="kpi-label">Høy CSUB-relevans</div>
-    <div class="kpi-value">63</div>
-    <div class="kpi-change">25.5% av total</div>
+    <div class="kpi-label">Totale XMTs</div>
+    <div class="kpi-value">—</div>
+    <div class="kpi-change"></div>
   </div>
   <div class="kpi animate delay-5">
     <div class="kpi-label">Regioner</div>
-    <div class="kpi-value">5</div>
-    <div class="kpi-change">Nordsjøen dominerer</div>
+    <div class="kpi-value">—</div>
+    <div class="kpi-change"></div>
   </div>
 </div>
 
@@ -463,33 +465,33 @@ tbody tr:hover { background:var(--green-50); }
   <div class="card-title">Salgspipeline <span class="icon">📊</span></div>
   <div class="pipeline">
     <div class="pipeline-step">
-      <div class="step-count">142</div>
+      <div class="step-count">...</div>
       <div class="step-label">FEED</div>
-      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:100%"></div></div>
+      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:0%"></div></div>
     </div>
     <div class="pipeline-arrow">→</div>
     <div class="pipeline-step">
-      <div class="step-count">67</div>
+      <div class="step-count">...</div>
       <div class="step-label">Bud på bud</div>
-      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:47%"></div></div>
+      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:0%"></div></div>
     </div>
     <div class="pipeline-arrow">→</div>
     <div class="pipeline-step">
-      <div class="step-count">34</div>
+      <div class="step-count">...</div>
       <div class="step-label">Tildeling</div>
-      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:24%"></div></div>
+      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:0%"></div></div>
     </div>
     <div class="pipeline-arrow">→</div>
     <div class="pipeline-step">
-      <div class="step-count">18</div>
+      <div class="step-count">...</div>
       <div class="step-label">CSUB direkte kontakt</div>
-      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:13%"></div></div>
+      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:0%"></div></div>
     </div>
     <div class="pipeline-arrow">→</div>
     <div class="pipeline-step">
-      <div class="step-count">9</div>
+      <div class="step-count">...</div>
       <div class="step-label">CSUB Contract Award</div>
-      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:6%"></div></div>
+      <div class="pipeline-bar"><div class="pipeline-bar-fill" style="width:0%"></div></div>
     </div>
   </div>
 </div>
@@ -502,30 +504,10 @@ tbody tr:hover { background:var(--green-50); }
     <div class="donut-container">
       <svg class="donut-svg" viewBox="0 0 160 160">
         <circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-100)" stroke-width="24"/>
-        <!-- FEED: 142/270 = 52.6% → 330.5 of 628.3 (2πr=377) stroke-dasharray -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-700)" stroke-width="24"
-          stroke-dasharray="198.3 179" stroke-dashoffset="0" transform="rotate(-90 80 80)" style="transition:stroke-dasharray 1s"/>
-        <!-- Bud: 67/270 = 24.8% → 93.6 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-500)" stroke-width="24"
-          stroke-dasharray="93.6 283.7" stroke-dashoffset="-198.3" transform="rotate(-90 80 80)"/>
-        <!-- Tildelt: 34/270 = 12.6% → 47.5 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-300)" stroke-width="24"
-          stroke-dasharray="47.5 329.8" stroke-dashoffset="-291.9" transform="rotate(-90 80 80)"/>
-        <!-- Kontaktet: 18/270 = 6.7% → 25.2 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--gold)" stroke-width="24"
-          stroke-dasharray="25.2 352.1" stroke-dashoffset="-339.4" transform="rotate(-90 80 80)"/>
-        <!-- Award: 9/270 = 3.3% → 12.4 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--gold-light)" stroke-width="24"
-          stroke-dasharray="12.4 364.9" stroke-dashoffset="-364.6" transform="rotate(-90 80 80)"/>
-        <text x="80" y="76" text-anchor="middle" font-family="IBM Plex Mono" font-size="22" font-weight="600" fill="var(--green-800)">270</text>
-        <text x="80" y="94" text-anchor="middle" font-family="Source Sans 3" font-size="10" fill="var(--text-secondary)">TOTALT</text>
+        <text x="80" y="84" text-anchor="middle" font-family="Source Sans 3" font-size="11" fill="var(--text-secondary)">Laster...</text>
       </svg>
       <div class="donut-legend">
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--green-700)"></div>FEED<span class="donut-legend-value">142</span></div>
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--green-500)"></div>Bud<span class="donut-legend-value">67</span></div>
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--green-300)"></div>Tildelt<span class="donut-legend-value">34</span></div>
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--gold)"></div>Kontaktet<span class="donut-legend-value">18</span></div>
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--gold-light)"></div>Award<span class="donut-legend-value">9</span></div>
+        <div class="loading-placeholder">Laster...</div>
       </div>
     </div>
   </div>
@@ -536,30 +518,10 @@ tbody tr:hover { background:var(--green-50); }
     <div class="donut-container">
       <svg class="donut-svg" viewBox="0 0 160 160">
         <circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-100)" stroke-width="24"/>
-        <!-- Nordsjøen 38% → 143.3 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-800)" stroke-width="24"
-          stroke-dasharray="143.3 234" stroke-dashoffset="0" transform="rotate(-90 80 80)"/>
-        <!-- Brasil 22% → 83 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-500)" stroke-width="24"
-          stroke-dasharray="83 294.3" stroke-dashoffset="-143.3" transform="rotate(-90 80 80)"/>
-        <!-- Vest-Afrika 18% → 67.9 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--green-300)" stroke-width="24"
-          stroke-dasharray="67.9 309.4" stroke-dashoffset="-226.3" transform="rotate(-90 80 80)"/>
-        <!-- Asia-Pac 12% → 45.2 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--gold)" stroke-width="24"
-          stroke-dasharray="45.2 332.1" stroke-dashoffset="-294.2" transform="rotate(-90 80 80)"/>
-        <!-- GoM 10% → 37.7 -->
-        <circle cx="80" cy="80" r="60" fill="none" stroke="var(--gold-light)" stroke-width="24"
-          stroke-dasharray="37.7 339.6" stroke-dashoffset="-339.4" transform="rotate(-90 80 80)"/>
-        <text x="80" y="76" text-anchor="middle" font-family="IBM Plex Mono" font-size="18" font-weight="600" fill="var(--green-800)">5</text>
-        <text x="80" y="94" text-anchor="middle" font-family="Source Sans 3" font-size="10" fill="var(--text-secondary)">REGIONER</text>
+        <text x="80" y="84" text-anchor="middle" font-family="Source Sans 3" font-size="11" fill="var(--text-secondary)">Laster...</text>
       </svg>
       <div class="donut-legend">
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--green-800)"></div>Nordsjøen<span class="donut-legend-value">38%</span></div>
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--green-500)"></div>Brasil<span class="donut-legend-value">22%</span></div>
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--green-300)"></div>Vest-Afrika<span class="donut-legend-value">18%</span></div>
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--gold)"></div>Asia-Pac<span class="donut-legend-value">12%</span></div>
-        <div class="donut-legend-item"><div class="donut-legend-color" style="background:var(--gold-light)"></div>GoM<span class="donut-legend-value">10%</span></div>
+        <div class="loading-placeholder">Laster...</div>
       </div>
     </div>
   </div>
@@ -580,30 +542,8 @@ tbody tr:hover { background:var(--green-50); }
       <text x="24" y="84" text-anchor="end" font-size="9" fill="var(--text-secondary)" font-family="IBM Plex Mono">20</text>
       <text x="24" y="114" text-anchor="end" font-size="9" fill="var(--text-secondary)" font-family="IBM Plex Mono">10</text>
       <text x="24" y="144" text-anchor="end" font-size="9" fill="var(--text-secondary)" font-family="IBM Plex Mono">0</text>
-      <!-- Area fill -->
-      <path d="M54,95 L78,89 L102,98 L126,80 L150,74 L174,68 L198,56 L222,50 L246,44 L270,38 L270,140 L54,140 Z"
-        fill="url(#trendGrad)" opacity=".3"/>
-      <!-- Line -->
-      <polyline points="54,95 78,89 102,98 126,80 150,74 174,68 198,56 222,50 246,44 270,38"
-        fill="none" stroke="var(--green-500)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <!-- Dots -->
-      <circle cx="54" cy="95" r="3" fill="var(--green-600)"/>
-      <circle cx="78" cy="89" r="3" fill="var(--green-600)"/>
-      <circle cx="102" cy="98" r="3" fill="var(--green-600)"/>
-      <circle cx="126" cy="80" r="3" fill="var(--green-600)"/>
-      <circle cx="150" cy="74" r="3" fill="var(--green-600)"/>
-      <circle cx="174" cy="68" r="3" fill="var(--green-600)"/>
-      <circle cx="198" cy="56" r="3" fill="var(--green-600)"/>
-      <circle cx="222" cy="50" r="3" fill="var(--green-600)"/>
-      <circle cx="246" cy="44" r="3" fill="var(--green-600)"/>
-      <circle cx="270" cy="38" r="4" fill="var(--gold)" stroke="var(--green-800)" stroke-width="2"/>
-      <!-- X labels -->
-      <text x="54" y="155" text-anchor="middle" font-size="8" fill="var(--text-secondary)">Mai</text>
-      <text x="102" y="155" text-anchor="middle" font-size="8" fill="var(--text-secondary)">Jul</text>
-      <text x="150" y="155" text-anchor="middle" font-size="8" fill="var(--text-secondary)">Sep</text>
-      <text x="198" y="155" text-anchor="middle" font-size="8" fill="var(--text-secondary)">Nov</text>
-      <text x="246" y="155" text-anchor="middle" font-size="8" fill="var(--text-secondary)">Jan</text>
-      <text x="270" y="155" text-anchor="middle" font-size="8" fill="var(--gold)" font-weight="700">Feb</text>
+      <!-- Loading placeholder -->
+      <text x="160" y="85" text-anchor="middle" font-family="Source Sans 3" font-size="12" fill="var(--text-secondary)">Laster...</text>
       <defs>
         <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="var(--green-400)" stop-opacity=".4"/>
@@ -612,8 +552,8 @@ tbody tr:hover { background:var(--green-50); }
       </defs>
     </svg>
     <div style="display:flex;justify-content:space-between;margin-top:4px;">
-      <span style="font-size:11px;color:var(--text-secondary)">Stigende trend ↗</span>
-      <span style="font-size:11px;font-weight:600;color:var(--green-700)">+34% siste 6 mnd</span>
+      <span style="font-size:11px;color:var(--text-secondary)"></span>
+      <span style="font-size:11px;font-weight:600;color:var(--green-700)"></span>
     </div>
   </div>
 </div>
@@ -629,54 +569,7 @@ tbody tr:hover { background:var(--green-50); }
     <span class="section-badge" style="background:var(--green-100);color:var(--green-700);margin-left:auto;">8 selskaper</span>
   </div>
   <div class="company-grid company-grid-primary">
-    <div class="company-card company-card-primary">
-      <div class="company-name">Subsea7</div>
-      <div class="company-count">48</div>
-      <div class="company-label">kontrakter</div>
-      <div class="company-bar"><div class="company-bar-fill" style="width:100%"></div></div>
-    </div>
-    <div class="company-card company-card-primary">
-      <div class="company-name">TechnipFMC</div>
-      <div class="company-count">41</div>
-      <div class="company-label">kontrakter</div>
-      <div class="company-bar"><div class="company-bar-fill" style="width:85%"></div></div>
-    </div>
-    <div class="company-card company-card-primary">
-      <div class="company-name">Saipem</div>
-      <div class="company-count">29</div>
-      <div class="company-label">kontrakter</div>
-      <div class="company-bar"><div class="company-bar-fill" style="width:60%"></div></div>
-    </div>
-    <div class="company-card company-card-primary">
-      <div class="company-name">McDermott</div>
-      <div class="company-count">12</div>
-      <div class="company-label">kontrakter</div>
-      <div class="company-bar"><div class="company-bar-fill" style="width:25%"></div></div>
-    </div>
-    <div class="company-card company-card-primary">
-      <div class="company-name">Allseas</div>
-      <div class="company-count">16</div>
-      <div class="company-label">kontrakter</div>
-      <div class="company-bar"><div class="company-bar-fill" style="width:33%"></div></div>
-    </div>
-    <div class="company-card company-card-primary">
-      <div class="company-name">Ocean Installer</div>
-      <div class="company-count">9</div>
-      <div class="company-label">kontrakter</div>
-      <div class="company-bar"><div class="company-bar-fill" style="width:19%"></div></div>
-    </div>
-    <div class="company-card company-card-primary">
-      <div class="company-name">DOF</div>
-      <div class="company-count">18</div>
-      <div class="company-label">kontrakter</div>
-      <div class="company-bar"><div class="company-bar-fill" style="width:38%"></div></div>
-    </div>
-    <div class="company-card company-card-primary">
-      <div class="company-name">DeepOcean</div>
-      <div class="company-count">11</div>
-      <div class="company-label">kontrakter</div>
-      <div class="company-bar"><div class="company-bar-fill" style="width:23%"></div></div>
-    </div>
+    <div class="loading-placeholder" style="grid-column:1/-1;">Laster data...</div>
   </div>
 </div>
 
@@ -689,41 +582,7 @@ tbody tr:hover { background:var(--green-50); }
       <span class="section-header-sub">— fremtidige kunder</span>
     </div>
     <div class="company-grid company-grid-secondary">
-      <div class="company-card company-card-secondary">
-        <div class="company-name">Wood</div>
-        <div class="company-count">14</div>
-        <div class="company-label">prosjekter</div>
-      </div>
-      <div class="company-card company-card-secondary">
-        <div class="company-name">Worley</div>
-        <div class="company-count">12</div>
-        <div class="company-label">prosjekter</div>
-      </div>
-      <div class="company-card company-card-secondary">
-        <div class="company-name">Aker Solutions</div>
-        <div class="company-count">34</div>
-        <div class="company-label">prosjekter</div>
-      </div>
-      <div class="company-card company-card-secondary">
-        <div class="company-name">Petrofac</div>
-        <div class="company-count">8</div>
-        <div class="company-label">prosjekter</div>
-      </div>
-      <div class="company-card company-card-secondary">
-        <div class="company-name">Genesis Energies</div>
-        <div class="company-count">6</div>
-        <div class="company-label">prosjekter</div>
-      </div>
-      <div class="company-card company-card-secondary">
-        <div class="company-name">Oceaneering</div>
-        <div class="company-count">22</div>
-        <div class="company-label">prosjekter</div>
-      </div>
-      <div class="company-card company-card-secondary">
-        <div class="company-name">Trendsetter</div>
-        <div class="company-count">5</div>
-        <div class="company-label">prosjekter</div>
-      </div>
+      <div class="loading-placeholder" style="grid-column:1/-1;">Laster data...</div>
     </div>
   </div>
 
@@ -735,15 +594,7 @@ tbody tr:hover { background:var(--green-50); }
       <span class="section-header-sub">— bakgrunnsinformasjon</span>
     </div>
     <div class="company-grid company-grid-tertiary">
-      <div class="company-card company-card-tertiary"><span class="company-name">Equinor</span><span class="company-count">42</span></div>
-      <div class="company-card company-card-tertiary"><span class="company-name">Shell</span><span class="company-count">34</span></div>
-      <div class="company-card company-card-tertiary"><span class="company-name">Petrobras</span><span class="company-count">28</span></div>
-      <div class="company-card company-card-tertiary"><span class="company-name">TotalEnergies</span><span class="company-count">22</span></div>
-      <div class="company-card company-card-tertiary"><span class="company-name">BP</span><span class="company-count">18</span></div>
-      <div class="company-card company-card-tertiary"><span class="company-name">Aker BP</span><span class="company-count">15</span></div>
-      <div class="company-card company-card-tertiary"><span class="company-name">Chevron</span><span class="company-count">14</span></div>
-      <div class="company-card company-card-tertiary"><span class="company-name">QatarEnergy</span><span class="company-count">9</span></div>
-      <div class="company-card company-card-tertiary"><span class="company-name">ConocoPhillips</span><span class="company-count">12</span></div>
+      <div class="loading-placeholder" style="grid-column:1/-1;">Laster data...</div>
     </div>
   </div>
 </div>
@@ -775,7 +626,7 @@ tbody tr:hover { background:var(--green-50); }
           <th>Ansvarlig</th>
         </tr>
       </thead>
-      <tbody id="contractTable"></tbody>
+      <tbody id="contractTable"><tr><td colspan="10" class="loading-placeholder">Laster...</td></tr></tbody>
     </table>
   </div>
   <div class="ai-disclaimer">
@@ -799,14 +650,14 @@ tbody tr:hover { background:var(--green-50); }
 <!-- TIMELINE -->
 <div class="card full-width">
   <div class="card-title">Tidslinje — kontrakttildelinger <span class="icon">📅</span></div>
-  <div class="timeline" id="timeline"></div>
+  <div class="timeline" id="timeline"><div class="loading-placeholder" style="width:100%;">Laster...</div></div>
 </div>
 
 <!-- 2-COL: NEWS + DRAG/DROP -->
 <div class="grid-2">
   <div class="card">
     <div class="card-title">Nyhetsstrøm — AI-kuratert <span class="icon">📰</span></div>
-    <div id="newsFeed"></div>
+    <div id="newsFeed"><div class="loading-placeholder">Laster...</div></div>
   </div>
   <div class="card" style="display:flex;flex-direction:column;">
     <div class="card-title">Dokumentopplasting <span class="icon">📄</span></div>
@@ -821,7 +672,7 @@ tbody tr:hover { background:var(--green-50); }
 <!-- FORECAST -->
 <div class="card full-width">
   <div class="card-title">Rystad-prognose — Subsea-marked til 2034 <span class="icon">📈</span></div>
-  <div class="forecast-chart" id="forecastChart"></div>
+  <div class="forecast-chart" id="forecastChart"><div class="loading-placeholder">Laster...</div></div>
   <div class="ai-disclaimer" style="margin-top:16px;">
     <span class="ai-icon">📊</span>
     Kilde: Rystad Energy — prognose oppdatert Q4 2025
@@ -890,26 +741,7 @@ tbody tr:hover { background:var(--green-50); }
 </div>
 
 <script>
-const contracts = [
-  {date:'2026-01-15',supplier:'Subsea7',operator:'Equinor',project:'Irpa Subsea Tieback',relevance:'high',region:'Nordsjøen',country:'Norge',type:'subsea',age:28,status:'Under behandling',handler:'Helge R.'},
-  {date:'2026-01-08',supplier:'TechnipFMC',operator:'Shell',project:'Jackdaw Phase 2 SURF',relevance:'high',region:'Nordsjøen',country:'UK',type:'epci',age:35,status:'Tilbudt',handler:'Helge R.'},
-  {date:'2025-12-20',supplier:'Saipem',operator:'Petrobras',project:'Búzios 9 FPSO Risers',relevance:'med',region:'Brasil',country:'Brasil',type:'epci',age:54,status:'Ny',handler:'—'},
-  {date:'2025-12-15',supplier:'Subsea7',operator:'TotalEnergies',project:'CLOV Phase 3 Subsea',relevance:'high',region:'Vest-Afrika',country:'Angola',type:'subsea',age:59,status:'Under behandling',handler:'Knut M.'},
-  {date:'2025-12-01',supplier:'Aker Solutions',operator:'Equinor',project:'Troll Phase 3 Exp',relevance:'high',region:'Nordsjøen',country:'Norge',type:'subsea',age:73,status:'Vunnet',handler:'Helge R.'},
-  {date:'2025-11-28',supplier:'TechnipFMC',operator:'BP',project:'Azeri Central East Umbilicals',relevance:'med',region:'Asia-Pac',country:'Aserbajdsjan',type:'subsea',age:76,status:'Tapt',handler:'Helge R.'},
-  {date:'2025-11-18',supplier:'Subsea7',operator:'Equinor',project:'Bacalhau Phase 2 SURF',relevance:'high',region:'Brasil',country:'Brasil',type:'epci',age:86,status:'Tilbudt',handler:'Helge R.'},
-  {date:'2025-11-05',supplier:'Prysmian',operator:'Aker BP',project:'Yggdrasil Power Cable',relevance:'low',region:'Nordsjøen',country:'Norge',type:'epci',age:99,status:'Ny',handler:'—'},
-  {date:'2025-10-22',supplier:'McDermott',operator:'LLOG',project:'Salamanca EPCI',relevance:'med',region:'GoM',country:'USA',type:'epci',age:113,status:'Under behandling',handler:'Knut M.'},
-  {date:'2025-10-10',supplier:'Saipem',operator:'ENI',project:'Coral South FLNG Phase 2',relevance:'high',region:'Vest-Afrika',country:'Mosambik',type:'epci',age:125,status:'Ny',handler:'—'},
-  {date:'2025-09-28',supplier:'Subsea Integration Alliance',operator:'Woodside',project:'Scarborough Subsea',relevance:'med',region:'Asia-Pac',country:'Australia',type:'subsea',age:137,status:'Tilbudt',handler:'Helge R.'},
-  {date:'2025-09-15',supplier:'TechnipFMC',operator:'Petrobras',project:'Mero 4 Flexible Risers',relevance:'high',region:'Brasil',country:'Brasil',type:'subsea',age:150,status:'Vunnet',handler:'Knut M.'},
-  {date:'2025-08-30',supplier:'Oceaneering',operator:'Chevron',project:'Anchor SPS Tooling',relevance:'high',region:'GoM',country:'USA',type:'subsea',age:166,status:'Under behandling',handler:'Helge R.'},
-  {date:'2025-08-12',supplier:'DOF Subsea',operator:'ConocoPhillips',project:'Eldfisk IMR Campaign',relevance:'low',region:'Nordsjøen',country:'Norge',type:'subsea',age:184,status:'Vunnet',handler:'Knut M.'},
-  {date:'2025-07-20',supplier:'Subsea7',operator:'Shell',project:'Bonga North SURF',relevance:'high',region:'Vest-Afrika',country:'Nigeria',type:'epci',age:207,status:'Under behandling',handler:'Helge R.'},
-  {date:'2026-02-05',supplier:'Aker Solutions',operator:'Equinor',project:'Wisting Subsea Production',relevance:'high',region:'Nordsjøen',country:'Norge',type:'subsea',age:7,status:'Ny',handler:'—'},
-  {date:'2026-02-01',supplier:'TechnipFMC',operator:'TotalEnergies',project:'Kaminho Block 20 SPS',relevance:'med',region:'Vest-Afrika',country:'Angola',type:'subsea',age:11,status:'Under behandling',handler:'Knut M.'},
-  {date:'2026-01-25',supplier:'Saipem',operator:'QatarEnergy',project:'North Field South Pipelines',relevance:'low',region:'Asia-Pac',country:'Qatar',type:'epci',age:18,status:'Ny',handler:'—'},
-];
+const contracts = [];
 
 function urgencyClass(age) { if(age<=14) return 'fresh'; if(age<=30) return 'active'; if(age<=60) return 'urgent'; return 'critical'; }
 function urgencyLabel(age) { if(age<=14) return 'Fresh'; if(age<=30) return 'Active'; if(age<=60) return 'Urgent'; return 'Critical'; }
@@ -978,33 +810,11 @@ function setLang(lang,btn) {
   document.getElementById('depthChart').innerHTML=depths.map((d,i)=>`<div class="depth-bar" style="height:${vals[i]/max*120}px;background:${colors[i]}"><div class="depth-value">${vals[i]}</div><div class="depth-label">${d}</div></div>`).join('');
 })();
 
-// TIMELINE
-(function(){
-  const months=['Jul','Aug','Sep','Okt','Nov','Des','Jan','Feb'];
-  const counts=[3,5,4,7,6,8,4,2];
-  document.getElementById('timeline').innerHTML=months.map((m,i)=>`<div class="timeline-month"><div class="month-label">${m}</div><div class="timeline-dot ${counts[i]===0?'empty':''}"></div><div class="timeline-count">${counts[i]} tildelinger</div></div>`).join('');
-})();
+// TIMELINE — populated by loadRealData()
 
-// NEWS
-(function(){
-  const news=[
-    {title:'Equinor tildeler Irpa-kontrakt til Subsea7 — verdt $1.2 mrd',src:'Upstream',date:'12. feb 2026',tag:'high'},
-    {title:'TechnipFMC melder rekordstor ordrebok for Q4 2025',src:'Reuters',date:'10. feb 2026',tag:'med'},
-    {title:'Petrobras akselererer Búzios-utbygging med 3 nye FPSO-er',src:'OE Digital',date:'8. feb 2026',tag:'high'},
-    {title:'Saipem vinner $800M EPCI-kontrakt i Vest-Afrika',src:'TradeWinds',date:'5. feb 2026',tag:'high'},
-    {title:'Subsea-markedet ventes å vokse 12% årlig til 2030 (Rystad)',src:'Rystad Energy',date:'1. feb 2026',tag:'med'},
-    {title:'Aker Solutions og Subsea7 danner ny allianse for nordisk shelf',src:'TU',date:'28. jan 2026',tag:'med'},
-  ];
-  document.getElementById('newsFeed').innerHTML=news.map(n=>`<div class="news-item"><span class="news-tag news-tag-${n.tag}">${n.tag==='high'?'Høy':'Medium'}</span><div class="news-content"><div class="news-title">${n.title}</div><div class="news-meta">${n.src} · ${n.date}</div></div></div>`).join('');
-})();
+// NEWS — populated by loadRealData()
 
-// FORECAST
-(function(){
-  const years=['2024','2025','2026','2027','2028','2029','2030','2031','2032','2033','2034'];
-  const vals=[42,48,55,61,68,72,78,82,88,91,97];
-  const max=Math.max(...vals);
-  document.getElementById('forecastChart').innerHTML=years.map((y,i)=>`<div class="forecast-bar" style="height:${vals[i]/max*120}px;background:${i<=1?'var(--green-700)':i<=2?'var(--green-600)':'linear-gradient(180deg,var(--green-400),var(--green-300))'}"><div class="f-value">${vals[i]}B</div><div class="f-label">${y}</div></div>`).join('');
-})();
+// FORECAST — populated by loadRealData()
 
 // DROP ZONE
 const dz=document.getElementById('dropZone');
@@ -1022,8 +832,6 @@ function setDrawerStatus(btn,status) {
   const handlerEl=document.getElementById('drawerHandler');
   handlerEl.style.display=status==='Under behandling'?'block':'none';
 }
-
-renderTable();
 
 // ===== LEAFLET MAP =====
 const COUNTRY_COORDS = {
