@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { IBM_Plex_Mono, Source_Sans_3, Source_Serif_4 } from 'next/font/google'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -6,13 +7,29 @@ export const metadata: Metadata = {
   description: 'Subsea contract awards and market intelligence dashboard',
 }
 
+const sourceSans = Source_Sans_3({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  display: 'swap',
+})
+
+const sourceSerif = Source_Serif_4({
+  subsets: ['latin'],
+  variable: '--font-serif',
+  display: 'swap',
+})
+
+const plexMono = IBM_Plex_Mono({
+  weight: ['400', '500'],
+  subsets: ['latin'],
+  variable: '--font-mono',
+  display: 'swap',
+})
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="no">
-      <head>
-        <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600;700&family=Source+Serif+4:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-      </head>
-      <body className="antialiased">
+    <html lang="no" className={`${sourceSans.variable} ${sourceSerif.variable} ${plexMono.variable}`}>
+      <body className="font-sans antialiased bg-[var(--bg-dark)] text-gray-100 selection:bg-[#4db89e] selection:text-[#0e2620]">
         {children}
       </body>
     </html>

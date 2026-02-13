@@ -1,14 +1,19 @@
 import { NextResponse } from 'next/server'
-import { createAdminClient as createClient } from '@/lib/supabase/admin'
+import { requireAllowedApiUser } from '@/lib/auth/require-user'
 
 export async function GET() {
   try {
-    const supabase = createClient()
+    const auth = await requireAllowedApiUser()
+    if (!auth.ok) return auth.response
+    const supabase = auth.supabase
 
     const [projectsRes, contractsRes] = await Promise.all([
-      supabase.from('projects').select('*'),
-      supabase.from('contracts').select('*'),
+      supabase.from('projects').select('surf_km, xmt_count, continent'),
+      supabase.from('contracts').select('region, created_at, award_date'),
     ])
+
+    if (projectsRes.error) throw projectsRes.error
+    if (contractsRes.error) throw contractsRes.error
 
     const projects = projectsRes.data || []
     const contracts = contractsRes.data || []

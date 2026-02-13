@@ -1,19 +1,121 @@
 import { NextResponse } from 'next/server'
-import { createAdminClient as createClient } from '@/lib/supabase/admin'
+import { requireAllowedApiUser } from '@/lib/auth/require-user'
+
+function parseYear(value: string | null | undefined): number | null {
+  if (!value) return null
+  const yearOnly = Number(value)
+  if (!Number.isNaN(yearOnly) && yearOnly > 1900 && yearOnly < 2200) return yearOnly
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.getUTCFullYear()
+}
 
 export async function GET() {
   try {
-    const supabase = createClient()
+    const auth = await requireAllowedApiUser()
+    if (!auth.ok) return auth.response
+    const supabase = auth.supabase
 
-    const { data, error } = await supabase
-      .from('projects')
-      .select('*')
-      .order('first_year', { ascending: false })
-      .limit(200)
+    const [projectsRes, contractsRes] = await Promise.all([
+      supabase
+        .from('projects')
+        .select(`
+          development_project,
+          asset,
+          country,
+          continent,
+          operator,
+          surf_contractor,
+          facility_category,
+          water_depth_category,
+          xmt_count,
+          surf_km,
+          first_year,
+          last_year,
+          created_at
+        `)
+        .limit(5000),
+      supabase
+        .from('contracts')
+        .select(`
+          project_name,
+          title,
+          contract_name,
+          description,
+          contract_type,
+          country,
+          region,
+          operator,
+          contractor,
+          award_date,
+          created_at,
+          water_depth_m
+        `)
+        .limit(5000),
+    ])
 
-    if (error) throw error
+    if (projectsRes.error) {
+      console.error('projects query failed:', projectsRes.error)
+    }
+    if (contractsRes.error) {
+      console.error('contracts query failed:', contractsRes.error)
+    }
 
-    return NextResponse.json(data || [])
+    if (projectsRes.error && contractsRes.error) {
+      throw new Error(`Both dashboard queries failed: projects=${projectsRes.error.message} contracts=${contractsRes.error.message}`)
+    }
+
+    const projects = (projectsRes.error ? [] : projectsRes.data || []).map((project) => {
+      const firstYear = project.first_year || parseYear(project.created_at)
+      const lastYear = project.last_year || firstYear
+      return {
+        development_project: project.development_project || project.asset || 'Unknown project',
+        asset: project.asset || '',
+        country: project.country || 'Unknown',
+        continent: project.continent || 'Unknown',
+        operator: project.operator || '',
+        surf_contractor: project.surf_contractor || '',
+        facility_category: project.facility_category || 'Unknown',
+        water_depth_category: project.water_depth_category || 'Unknown',
+        xmt_count: project.xmt_count || 0,
+        surf_km: project.surf_km || 0,
+        first_year: firstYear,
+        last_year: lastYear,
+        created_at: project.created_at || null,
+        data_source: 'project',
+      }
+    })
+
+    const contracts = (contractsRes.error ? [] : contractsRes.data || []).map((contract) => {
+      const contractYear = parseYear(contract.award_date) || parseYear(contract.created_at)
+      const projectName = contract.project_name || contract.title || contract.contract_name || contract.description
+
+      return {
+        development_project: projectName || contract.contract_type || 'Contract',
+        asset: contract.contract_type || 'Contract',
+        country: contract.country || 'Unknown',
+        continent: contract.region || 'Unknown',
+        operator: contract.operator || '',
+        surf_contractor: contract.contractor || '',
+        facility_category: contract.contract_type || 'Contract',
+        water_depth_category: typeof contract.water_depth_m === 'number' ? `${contract.water_depth_m} m` : 'Unknown',
+        xmt_count: 0,
+        surf_km: 0,
+        first_year: contractYear,
+        last_year: contractYear,
+        award_date: contract.award_date || null,
+        created_at: contract.created_at || null,
+        data_source: 'contract',
+      }
+    })
+
+    const merged = [...projects, ...contracts].sort((a, b) => {
+      const yearA = Number(a.first_year || a.last_year || 0)
+      const yearB = Number(b.first_year || b.last_year || 0)
+      return yearB - yearA
+    })
+
+    return NextResponse.json(merged)
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 })
   }
