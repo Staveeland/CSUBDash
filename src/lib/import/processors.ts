@@ -48,6 +48,38 @@ function getOpenAI() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 }
 
+/**
+ * Deduplicate rows by conflict key columns.
+ * When duplicates exist, numeric values are summed and the last row's
+ * non-numeric values win.
+ */
+function deduplicateByConflictKey(
+  rows: Record<string, unknown>[],
+  conflictColumns: string[]
+): Record<string, unknown>[] {
+  const map = new Map<string, Record<string, unknown>>()
+
+  for (const row of rows) {
+    const key = conflictColumns.map((col) => String(row[col] ?? '')).join('|:|')
+
+    if (!map.has(key)) {
+      map.set(key, { ...row })
+    } else {
+      const existing = map.get(key)!
+      for (const [k, v] of Object.entries(row)) {
+        if (conflictColumns.includes(k)) continue
+        if (typeof v === 'number' && typeof existing[k] === 'number') {
+          ;(existing[k] as number) += v
+        } else if (v !== null && v !== undefined) {
+          existing[k] = v
+        }
+      }
+    }
+  }
+
+  return Array.from(map.values())
+}
+
 async function upsertChunked(
   supabase: ReturnType<typeof createAdminClient>,
   table: string,
@@ -56,9 +88,11 @@ async function upsertChunked(
 ) {
   let imported = 0
   let skipped = 0
+  const conflictColumns = onConflict.split(',').map((c) => c.trim())
 
   for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-    const chunk = rows.slice(i, i + CHUNK_SIZE)
+    const rawChunk = rows.slice(i, i + CHUNK_SIZE)
+    const chunk = deduplicateByConflictKey(rawChunk, conflictColumns)
     const { data, error } = await supabase
       .from(table)
       .upsert(chunk, { onConflict, ignoreDuplicates: false })
@@ -243,8 +277,8 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
         distance_group: str((r as Record<string, unknown>)['Distance To Tie In Group']),
         contract_award_year: int((r as Record<string, unknown>)['XMT Contract Award Year']),
         contract_type: str((r as Record<string, unknown>)['XMT Contract Type']),
-        purpose: str((r as Record<string, unknown>)['XMT Purpose']),
-        state: str((r as Record<string, unknown>)['XMT State']),
+        purpose: str((r as Record<string, unknown>)['XMT Purpose']) || '',
+        state: str((r as Record<string, unknown>)['XMT State']) || '',
         xmt_count: int((r as Record<string, unknown>)['XMTs installed (also future)']),
       }))
       .filter((r) => r.development_project)
@@ -268,8 +302,8 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
         field_type: str((r as Record<string, unknown>)['Field Type Category']),
         water_depth_category: str((r as Record<string, unknown>)['Water Depth Category']),
         distance_group: str((r as Record<string, unknown>)['Distance To Tie In Group']),
-        design_category: str((r as Record<string, unknown>)['SURF Line Design Category']),
-        line_group: str((r as Record<string, unknown>)['SURF Line Group']),
+        design_category: str((r as Record<string, unknown>)['SURF Line Design Category']) || '',
+        line_group: str((r as Record<string, unknown>)['SURF Line Group']) || '',
         km_surf_lines: num((r as Record<string, unknown>)['KM Surf Lines']),
       }))
       .filter((r) => r.development_project)
@@ -293,7 +327,7 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
         field_type: str((r as Record<string, unknown>)['Field Type Category']),
         water_depth_category: str((r as Record<string, unknown>)['Water Depth Category']),
         distance_group: str((r as Record<string, unknown>)['Distance To Tie In Group']),
-        unit_category: str((r as Record<string, unknown>)['Subsea Unit Category']),
+        unit_category: str((r as Record<string, unknown>)['Subsea Unit Category']) || '',
         unit_count: int((r as Record<string, unknown>)['Subsea Units']),
       }))
       .filter((r) => r.development_project)
