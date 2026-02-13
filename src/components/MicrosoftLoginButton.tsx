@@ -28,6 +28,7 @@ export default function MicrosoftLoginButton({ nextPath }: { nextPath?: string }
       provider: 'azure',
       options: {
         redirectTo: callbackUrl.toString(),
+        scopes: 'email',
         queryParams: {
           prompt: 'select_account',
         },
