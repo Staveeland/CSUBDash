@@ -635,7 +635,7 @@ Return ONLY valid JSON, no other text.`,
       const { data: doc, error: docError } = await supabase
         .from('documents')
         .insert({
-          uploaded_by: (await getSystemUserId(supabase)),
+          uploaded_by: null,
           file_name: job.file_name,
           file_path: `${job.storage_bucket}/${job.storage_path}`,
           file_type: 'application/pdf',
