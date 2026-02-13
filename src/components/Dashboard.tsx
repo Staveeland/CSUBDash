@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNo
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
+import IntelSpace3D from './IntelSpace3D'
 import {
   Area,
   AreaChart,
@@ -569,6 +570,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [lang, setLang] = useState<'no' | 'en'>('no')
   const [region, setRegion] = useState<RegionFilter>('All')
   const [view, setView] = useState<DashboardView>('historical')
+  const [show3DView, setShow3DView] = useState(false)
 
   // Market Intelligence state
   const [forecasts, setForecasts] = useState<ForecastRecord[]>([])
@@ -938,35 +940,44 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         )}
 
         <section className="space-y-4">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Sok i kontrakter, prosjekter, nyheter..."
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full rounded-xl border border-[var(--csub-light-soft)] bg-[var(--csub-dark)] px-4 py-3 text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--csub-gold)]"
-            />
-            {searchQuery.trim().length > 0 && (
-              <div className="absolute top-[calc(100%+10px)] left-0 right-0 z-40 rounded-xl border border-[var(--csub-light-soft)] bg-[var(--csub-dark)] shadow-xl overflow-hidden">
-                {liveSearchResults.length > 0 ? (
-                  liveSearchResults.map((project) => (
-                    <button
-                      type="button"
-                      key={buildProjectKey(project)}
-                      onClick={() => openFromSearch(project)}
-                      className="w-full text-left px-4 py-3 border-b border-[var(--csub-light-faint)] last:border-b-0 hover:bg-[color:rgba(77,184,158,0.08)] transition-colors cursor-pointer"
-                    >
-                      <p className="text-sm text-white">{project.development_project || project.asset || 'Ukjent prosjekt'}</p>
-                      <p className="text-xs text-[var(--text-muted)] mt-1">
-                        {project.country || 'Ukjent marked'} • {project.operator || project.surf_contractor || 'Ukjent aktor'}
-                      </p>
-                    </button>
-                  ))
-                ) : (
-                  <div className="px-4 py-3 text-sm text-[var(--text-muted)]">Ingen treff for dette soket.</div>
-                )}
-              </div>
-            )}
+          <div className="flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                placeholder="Sok i kontrakter, prosjekter, nyheter..."
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                className="w-full rounded-xl border border-[var(--csub-light-soft)] bg-[var(--csub-dark)] px-4 py-3 text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--csub-gold)]"
+              />
+              {searchQuery.trim().length > 0 && (
+                <div className="absolute top-[calc(100%+10px)] left-0 right-0 z-40 rounded-xl border border-[var(--csub-light-soft)] bg-[var(--csub-dark)] shadow-xl overflow-hidden">
+                  {liveSearchResults.length > 0 ? (
+                    liveSearchResults.map((project) => (
+                      <button
+                        type="button"
+                        key={buildProjectKey(project)}
+                        onClick={() => openFromSearch(project)}
+                        className="w-full text-left px-4 py-3 border-b border-[var(--csub-light-faint)] last:border-b-0 hover:bg-[color:rgba(77,184,158,0.08)] transition-colors cursor-pointer"
+                      >
+                        <p className="text-sm text-white">{project.development_project || project.asset || 'Ukjent prosjekt'}</p>
+                        <p className="text-xs text-[var(--text-muted)] mt-1">
+                          {project.country || 'Ukjent marked'} • {project.operator || project.surf_contractor || 'Ukjent aktor'}
+                        </p>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-[var(--text-muted)]">Ingen treff for dette soket.</div>
+                  )}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShow3DView(true)}
+              className="inline-flex items-center justify-center rounded-xl border border-[var(--csub-light-soft)] bg-[color:rgba(77,184,158,0.12)] px-5 py-3 text-sm font-semibold text-[var(--csub-light)] hover:bg-[color:rgba(77,184,158,0.2)] hover:text-white transition-colors shadow-sm cursor-pointer"
+            >
+              🪐 3D View
+            </button>
           </div>
 
           <div className="mb-6 flex flex-col gap-4 bg-[var(--csub-dark)] p-4 rounded-xl border border-[var(--csub-light-soft)] shadow-sm">
@@ -1542,6 +1553,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </>
         )}
       </div>
+      {show3DView && <IntelSpace3D onClose={() => setShow3DView(false)} />}
     </div>
   )
 }
