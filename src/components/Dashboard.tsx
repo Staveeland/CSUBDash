@@ -63,6 +63,7 @@ interface Project {
 }
 
 type RegionFilter = 'All' | 'NorthSea' | 'GoM'
+type DashboardView = 'historical' | 'future'
 
 interface PipelinePoint {
   period: string
@@ -83,6 +84,11 @@ const GOM_COUNTRIES = new Set(['united states', 'usa', 'mexico', 'trinidad', 'tr
 
 function normalize(input: string | undefined): string {
   return (input ?? '').trim().toLowerCase()
+}
+
+function buildProjectKey(project: Project): string {
+  const raw = `${project.development_project || project.asset || 'project'}-${project.country || 'country'}-${project.first_year || project.last_year || 'year'}-${project.operator || 'operator'}`
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 }
 
 function buildChartsFromProjects(source: Project[]): Charts {
@@ -199,28 +205,19 @@ function CompactTooltip({ active, payload, label }: { active?: boolean; payload?
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [charts, setCharts] = useState<Charts | null>(null)
-  const [companies, setCompanies] = useState<Companies | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [highlightedProjectKey, setHighlightedProjectKey] = useState<string | null>(null)
   const [lang, setLang] = useState<'no' | 'en'>('no')
   const [region, setRegion] = useState<RegionFilter>('All')
+  const [view, setView] = useState<DashboardView>('historical')
 
   const fetchData = useCallback(async () => {
     try {
-      const [s, c, co, p] = await Promise.all([
-        fetch('/api/dashboard/stats').then((response) => (response.ok ? response.json() : null)),
-        fetch('/api/dashboard/charts').then((response) => (response.ok ? response.json() : null)),
-        fetch('/api/dashboard/companies').then((response) => (response.ok ? response.json() : null)),
-        fetch('/api/dashboard/projects').then((response) => (response.ok ? response.json() : null)),
-      ])
-      if (s) setStats(s)
-      if (c) setCharts(c)
-      if (co) setCompanies(co)
+      const p = await fetch('/api/dashboard/projects').then((response) => (response.ok ? response.json() : null))
       if (Array.isArray(p)) setProjects(p)
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
@@ -233,72 +230,96 @@ export default function Dashboard() {
     fetchData()
   }, [fetchData])
 
+  useEffect(() => {
+    if (!highlightedProjectKey) return
+    const timeout = window.setTimeout(() => setHighlightedProjectKey(null), 2500)
+    return () => window.clearTimeout(timeout)
+  }, [highlightedProjectKey])
+
   const regionProjects = useMemo(
     () => projects.filter((project) => belongsToRegion(project, region)),
     [projects, region]
   )
 
+  const currentYear = new Date().getFullYear()
+
+  const viewProjects = useMemo(() => {
+    return regionProjects.filter((project) => {
+      const year = project.first_year || project.last_year
+      if (!year) return view === 'historical'
+      if (view === 'historical') return year <= currentYear
+      return year > currentYear
+    })
+  }, [regionProjects, view, currentYear])
+
   const filteredProjects = useMemo(() => {
-    if (!searchQuery) return regionProjects
+    if (!searchQuery) return viewProjects
     const query = searchQuery.toLowerCase()
-    return regionProjects.filter((project) =>
+    return viewProjects.filter((project) =>
       Object.values(project).some((value) => String(value).toLowerCase().includes(query))
     )
-  }, [regionProjects, searchQuery])
+  }, [viewProjects, searchQuery])
 
-  const projectCharts = useMemo(() => buildChartsFromProjects(regionProjects), [regionProjects])
-  const activeCharts = useMemo<Charts>(
-    () => (region === 'All' && charts ? charts : projectCharts),
-    [region, charts, projectCharts]
-  )
+  const liveSearchResults = useMemo(() => {
+    const trimmed = searchQuery.trim()
+    if (!trimmed) return []
+    const query = trimmed.toLowerCase()
+    return viewProjects
+      .filter((project) => {
+        const fields = [
+          project.development_project,
+          project.asset,
+          project.operator,
+          project.surf_contractor,
+          project.country,
+        ]
+        return fields.some((field) => normalize(field).includes(query))
+      })
+      .slice(0, 8)
+  }, [viewProjects, searchQuery])
 
-  const projectCompanies = useMemo(() => buildCompaniesFromProjects(regionProjects), [regionProjects])
-  const activeCompanies = useMemo<Companies>(
-    () => (region === 'All' && companies ? companies : projectCompanies),
-    [region, companies, projectCompanies]
-  )
+  const viewCharts = useMemo(() => buildChartsFromProjects(viewProjects), [viewProjects])
+  const viewCompanies = useMemo(() => buildCompaniesFromProjects(viewProjects), [viewProjects])
 
   const computedStats = useMemo<Stats>(() => {
     const continents = new Set<string>()
     let totalSurfKm = 0
     let totalXmts = 0
 
-    regionProjects.forEach((project) => {
+    viewProjects.forEach((project) => {
       if (project.continent) continents.add(project.continent)
       totalSurfKm += project.surf_km || 0
       totalXmts += project.xmt_count || 0
     })
 
-    const currentYear = new Date().getFullYear()
-    const upcomingAwards = regionProjects.filter((project) => (project.first_year || project.last_year || 0) >= currentYear).length
+    const upcomingAwards = viewProjects.filter((project) => {
+      const year = project.first_year || project.last_year || 0
+      if (view === 'historical') return year >= currentYear - 1 && year <= currentYear
+      return year >= currentYear
+    }).length
 
     return {
-      totalProjects: regionProjects.length,
+      totalProjects: viewProjects.length,
       totalSurfKm: Math.round(totalSurfKm),
       totalXmts: Math.round(totalXmts),
       upcomingAwards,
       regionCount: continents.size,
     }
-  }, [regionProjects])
+  }, [viewProjects, view, currentYear])
 
-  const activeStats = useMemo<Stats>(() => {
-    if (region === 'All' && stats) return stats
-    return computedStats
-  }, [region, stats, computedStats])
-
-  const pipelineData = useMemo(() => buildPipelineByYear(regionProjects), [regionProjects])
+  const pipelineData = useMemo(() => buildPipelineByYear(viewProjects), [viewProjects])
 
   const pipelineFlowData = useMemo(() => {
-    const phases = activeCharts.byPhase
+    const phases = viewCharts.byPhase
     return PIPELINE_FLOW.map((label, index) => {
-      if (label === 'FEED') return { label, value: regionProjects.length }
+      if (label === 'FEED') return { label, value: viewProjects.length }
       const query = label.toLowerCase()
       const value = phases
         .filter((phase) => normalize(phase.phase).includes(query))
         .reduce((sum, phase) => sum + phase.count, 0)
-      return { label, value: value || (index === 1 ? Math.round(regionProjects.length * 0.6) : 0) }
+      return { label, value: value || (index === 1 ? Math.round(viewProjects.length * 0.6) : 0) }
     })
-  }, [activeCharts.byPhase, regionProjects.length])
+  }, [viewCharts.byPhase, viewProjects.length])
 
   const activityFeed = useMemo<ActivityItem[]>(() => {
     const timeline = ['2 timer siden', '5 timer siden', '1 dag siden', '2 dager siden', '3 dager siden']
@@ -315,10 +336,22 @@ export default function Dashboard() {
     setDrawerOpen(true)
   }
 
+  const openFromSearch = (project: Project) => {
+    const projectKey = buildProjectKey(project)
+    setHighlightedProjectKey(projectKey)
+    setSearchQuery(project.development_project || project.asset || '')
+    openDrawer(project)
+    window.requestAnimationFrame(() => {
+      document.getElementById(`project-row-${projectKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
+
   const closeDrawer = () => {
     setDrawerOpen(false)
     setTimeout(() => setSelectedProject(null), 300)
   }
+
+  const viewLabel = view === 'historical' ? 'Historiske Contract Awards' : 'Kommende Prosjekter'
 
   return (
     <div className="min-h-screen bg-[var(--bg-dark)] text-gray-100">
@@ -361,32 +394,78 @@ export default function Dashboard() {
               onChange={(event) => setSearchQuery(event.target.value)}
               className="w-full rounded-xl border border-[var(--csub-light-soft)] bg-[var(--csub-dark)] px-4 py-3 text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--csub-gold)]"
             />
+            {searchQuery.trim().length > 0 && (
+              <div className="absolute top-[calc(100%+10px)] left-0 right-0 z-40 rounded-xl border border-[var(--csub-light-soft)] bg-[var(--csub-dark)] shadow-xl overflow-hidden">
+                {liveSearchResults.length > 0 ? (
+                  liveSearchResults.map((project) => (
+                    <button
+                      type="button"
+                      key={buildProjectKey(project)}
+                      onClick={() => openFromSearch(project)}
+                      className="w-full text-left px-4 py-3 border-b border-[var(--csub-light-faint)] last:border-b-0 hover:bg-[color:rgba(77,184,158,0.08)] transition-colors cursor-pointer"
+                    >
+                      <p className="text-sm text-white">{project.development_project || project.asset || 'Ukjent prosjekt'}</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">
+                        {project.country || 'Ukjent marked'} • {project.operator || project.surf_contractor || 'Ukjent aktor'}
+                      </p>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-4 py-3 text-sm text-[var(--text-muted)]">Ingen treff for dette soket.</div>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[var(--csub-dark)] p-4 rounded-xl border border-[var(--csub-light-soft)] shadow-sm">
-            <div>
-              <h2 className="text-lg text-white">Pipeline Filter</h2>
-              <p className="text-xs text-[var(--text-muted)]">Global filtrering for hele dashbordet</p>
+          <div className="mb-6 flex flex-col gap-4 bg-[var(--csub-dark)] p-4 rounded-xl border border-[var(--csub-light-soft)] shadow-sm">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div>
+                <h2 className="text-lg text-white">Dashboard View</h2>
+                <p className="text-xs text-[var(--text-muted)]">To tydelige arbeidsflater for historikk og fremtid</p>
+              </div>
+              <div className="w-full lg:w-auto rounded-lg border border-[var(--csub-light-soft)] bg-[var(--bg-dark)] p-1 grid grid-cols-1 sm:grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setView('historical')}
+                  className={`px-4 py-2 text-sm rounded-md transition-colors cursor-pointer ${view === 'historical' ? 'bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold' : 'text-[var(--text-muted)] hover:text-white'}`}
+                >
+                  Historiske Contract Awards
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView('future')}
+                  className={`px-4 py-2 text-sm rounded-md transition-colors cursor-pointer ${view === 'future' ? 'bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold' : 'text-[var(--text-muted)] hover:text-white'}`}
+                >
+                  Future / Kommende Prosjekter
+                </button>
+              </div>
             </div>
-            <select
-              value={region}
-              onChange={(event) => setRegion(event.target.value as RegionFilter)}
-              className="bg-[var(--bg-dark)] border border-[var(--csub-light-soft)] text-white text-sm rounded-lg px-4 py-2 font-sans focus:ring-2 focus:ring-[var(--csub-gold)] focus:outline-none w-full sm:w-auto cursor-pointer"
-            >
-              <option value="All">Globalt (Alle prosjekter)</option>
-              <option value="NorthSea">Nordsjoen</option>
-              <option value="GoM">Gulf of Mexico</option>
-            </select>
+
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="text-base text-white">{viewLabel}</h3>
+                <p className="text-xs text-[var(--text-muted)]">Regionfilter gjelder alltid for valgt view</p>
+              </div>
+              <select
+                value={region}
+                onChange={(event) => setRegion(event.target.value as RegionFilter)}
+                className="bg-[var(--bg-dark)] border border-[var(--csub-light-soft)] text-white text-sm rounded-lg px-4 py-2 font-sans focus:ring-2 focus:ring-[var(--csub-gold)] focus:outline-none w-full sm:w-auto cursor-pointer"
+              >
+                <option value="All">Globalt (Alle prosjekter)</option>
+                <option value="NorthSea">Nordsjoen</option>
+                <option value="GoM">Gulf of Mexico</option>
+              </select>
+            </div>
           </div>
         </section>
 
-        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6">
           {[
-            { label: 'Total Pipeline', value: loading ? '—' : activeStats.totalProjects.toLocaleString('en-US') },
-            { label: 'Total SURF km', value: loading ? '—' : `${activeStats.totalSurfKm.toLocaleString('en-US')} km` },
-            { label: 'Total XMTs', value: loading ? '—' : activeStats.totalXmts.toLocaleString('en-US') },
-            { label: 'Nye siste 30d', value: loading ? '—' : activeStats.upcomingAwards.toLocaleString('en-US') },
-            { label: 'Regioner', value: loading ? '—' : activeStats.regionCount.toLocaleString('en-US') },
+            { label: 'Total poster', value: loading ? '—' : computedStats.totalProjects.toLocaleString('en-US') },
+            { label: 'Total SURF km', value: loading ? '—' : `${computedStats.totalSurfKm.toLocaleString('en-US')} km` },
+            { label: 'Total XMTs', value: loading ? '—' : computedStats.totalXmts.toLocaleString('en-US') },
+            { label: view === 'historical' ? 'Awards siste 12m' : 'Kommende prosjekter', value: loading ? '—' : computedStats.upcomingAwards.toLocaleString('en-US') },
+            { label: 'Regioner', value: loading ? '—' : computedStats.regionCount.toLocaleString('en-US') },
           ].map((kpi) => (
             <div key={kpi.label} className="bg-[var(--csub-dark)] p-6 rounded-xl border border-[var(--csub-light-soft)] shadow-lg flex flex-col justify-between">
               <span className="text-xs font-sans text-[var(--text-muted)] uppercase tracking-wider">{kpi.label}</span>
@@ -396,7 +475,7 @@ export default function Dashboard() {
         </section>
 
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Panel title="Estimert pipelineverdi" className="lg:col-span-2 min-h-[400px]">
+          <Panel title={view === 'historical' ? 'Historisk kontraktverdi' : 'Kommende pipelineverdi'} className="lg:col-span-2 min-h-[400px]">
             {!pipelineData.length ? (
               <LoadingPlaceholder text={loading ? 'Laster pipeline...' : 'Ingen pipeline-data for valgt filter'} />
             ) : (
@@ -446,15 +525,15 @@ export default function Dashboard() {
 
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Panel title="Kontrakter etter fase">
-            {!activeCharts.byPhase.length ? (
+            {!viewCharts.byPhase.length ? (
               <LoadingPlaceholder />
             ) : (
               <div className="flex items-center gap-4">
                 <div className="w-[160px] h-[160px] shrink-0">
                   <ResponsiveContainer>
                     <PieChart>
-                      <Pie data={activeCharts.byPhase.slice(0, 6)} dataKey="count" nameKey="phase" cx="50%" cy="50%" innerRadius={38} outerRadius={70} strokeWidth={0}>
-                        {activeCharts.byPhase.slice(0, 6).map((entry, index) => (
+                      <Pie data={viewCharts.byPhase.slice(0, 6)} dataKey="count" nameKey="phase" cx="50%" cy="50%" innerRadius={38} outerRadius={70} strokeWidth={0}>
+                        {viewCharts.byPhase.slice(0, 6).map((entry, index) => (
                           <Cell key={`${entry.phase}-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
                         ))}
                       </Pie>
@@ -463,7 +542,7 @@ export default function Dashboard() {
                   </ResponsiveContainer>
                 </div>
                 <div className="flex flex-col gap-2 w-full">
-                  {activeCharts.byPhase.slice(0, 6).map((item, index) => (
+                  {viewCharts.byPhase.slice(0, 6).map((item, index) => (
                     <div key={item.phase} className="flex items-center gap-2 text-xs">
                       <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }} />
                       <span className="truncate text-[var(--text-muted)]">{item.phase}</span>
@@ -476,15 +555,15 @@ export default function Dashboard() {
           </Panel>
 
           <Panel title="Regional fordeling">
-            {!activeCharts.byCountry.length ? (
+            {!viewCharts.byCountry.length ? (
               <LoadingPlaceholder />
             ) : (
               <div className="flex items-center gap-4">
                 <div className="w-[160px] h-[160px] shrink-0">
                   <ResponsiveContainer>
                     <PieChart>
-                      <Pie data={activeCharts.byCountry.slice(0, 6)} dataKey="count" nameKey="country" cx="50%" cy="50%" innerRadius={38} outerRadius={70} strokeWidth={0}>
-                        {activeCharts.byCountry.slice(0, 6).map((entry, index) => (
+                      <Pie data={viewCharts.byCountry.slice(0, 6)} dataKey="count" nameKey="country" cx="50%" cy="50%" innerRadius={38} outerRadius={70} strokeWidth={0}>
+                        {viewCharts.byCountry.slice(0, 6).map((entry, index) => (
                           <Cell key={`${entry.country}-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
                         ))}
                       </Pie>
@@ -493,7 +572,7 @@ export default function Dashboard() {
                   </ResponsiveContainer>
                 </div>
                 <div className="flex flex-col gap-2 w-full">
-                  {activeCharts.byCountry.slice(0, 6).map((item, index) => (
+                  {viewCharts.byCountry.slice(0, 6).map((item, index) => (
                     <div key={item.country} className="flex items-center gap-2 text-xs">
                       <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }} />
                       <span className="truncate text-[var(--text-muted)]">{item.country}</span>
@@ -506,12 +585,12 @@ export default function Dashboard() {
           </Panel>
 
           <Panel title="Kontrakttrend">
-            {!activeCharts.byYear.length ? (
+            {!viewCharts.byYear.length ? (
               <LoadingPlaceholder />
             ) : (
               <div className="h-[260px]">
                 <ResponsiveContainer>
-                  <AreaChart data={activeCharts.byYear}>
+                  <AreaChart data={viewCharts.byYear}>
                     <defs>
                       <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#4db89e" stopOpacity={0.35} />
@@ -533,14 +612,14 @@ export default function Dashboard() {
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Panel
             title="Installasjonsselskaper"
-            subtitle={`${activeCompanies.contractors.length.toLocaleString('en-US')} selskaper`}
+            subtitle={`${viewCompanies.contractors.length.toLocaleString('en-US')} selskaper`}
           >
-            {!activeCompanies.contractors.length ? (
+            {!viewCompanies.contractors.length ? (
               <LoadingPlaceholder />
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                {activeCompanies.contractors.slice(0, 8).map((contractor) => {
-                  const maxCount = Math.max(...activeCompanies.contractors.map((company) => company.count), 1)
+                {viewCompanies.contractors.slice(0, 8).map((contractor) => {
+                  const maxCount = Math.max(...viewCompanies.contractors.map((company) => company.count), 1)
                   return (
                     <div key={contractor.name} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4">
                       <p className="text-sm text-white truncate">{contractor.name}</p>
@@ -556,11 +635,11 @@ export default function Dashboard() {
           </Panel>
 
           <Panel title="Operatoroversikt">
-            {!activeCompanies.operators.length ? (
+            {!viewCompanies.operators.length ? (
               <LoadingPlaceholder />
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {activeCompanies.operators.slice(0, 10).map((operator) => (
+                {viewCompanies.operators.slice(0, 10).map((operator) => (
                   <div key={operator.name} className="flex justify-between items-center rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
                     <span className="text-sm text-[var(--text-muted)] truncate pr-3">{operator.name}</span>
                     <span className="font-mono text-sm text-white">{operator.count.toLocaleString('en-US')}</span>
@@ -573,7 +652,7 @@ export default function Dashboard() {
 
         <section className="bg-[var(--csub-dark)] rounded-xl border border-[var(--csub-light-soft)] overflow-hidden mt-6 shadow-lg">
           <div className="px-6 py-5 border-b border-[var(--csub-light-faint)]">
-            <h2 className="text-lg text-white">Kontraktoversikt</h2>
+            <h2 className="text-lg text-white">{view === 'historical' ? 'Historisk kontraktoversikt' : 'Kommende prosjektoversikt'}</h2>
           </div>
           <div className="overflow-x-auto w-full">
             <table className="w-full min-w-[700px] text-left text-sm whitespace-nowrap">
@@ -600,17 +679,29 @@ export default function Dashboard() {
                     </td>
                   </tr>
                 ) : (
-                  filteredProjects.slice(0, 50).map((project, index) => (
-                    <tr key={`${project.development_project}-${index}`} onClick={() => openDrawer(project)} className="cursor-pointer transition-colors hover:bg-[color:rgba(77,184,158,0.08)] border-b border-[var(--csub-light-faint)]">
-                      <td className="px-4 py-3 font-semibold text-white">{project.development_project || '—'}</td>
-                      <td className="px-4 py-3 text-[var(--text-muted)]">{project.country || '—'}</td>
-                      <td className="px-4 py-3 text-[var(--text-muted)]">{project.operator || '—'}</td>
-                      <td className="px-4 py-3 text-[var(--text-muted)]">{project.surf_contractor || '—'}</td>
-                      <td className="px-4 py-3 font-mono text-white">{project.water_depth_category || '—'}</td>
-                      <td className="px-4 py-3 font-mono text-white">{(project.xmt_count || 0).toLocaleString('en-US')}</td>
-                      <td className="px-4 py-3 font-mono text-white">{Math.round(project.surf_km || 0).toLocaleString('en-US')}</td>
-                    </tr>
-                  ))
+                  filteredProjects.slice(0, 50).map((project, index) => {
+                    const projectKey = buildProjectKey(project)
+                    const isHighlighted = highlightedProjectKey === projectKey
+                    return (
+                      <tr
+                        id={`project-row-${projectKey}`}
+                        key={`${projectKey}-${index}`}
+                        onClick={() => {
+                          setHighlightedProjectKey(projectKey)
+                          openDrawer(project)
+                        }}
+                        className={`cursor-pointer transition-colors border-b border-[var(--csub-light-faint)] ${isHighlighted ? 'bg-[color:rgba(77,184,158,0.16)]' : 'hover:bg-[color:rgba(77,184,158,0.08)]'}`}
+                      >
+                        <td className="px-4 py-3 font-semibold text-white">{project.development_project || '—'}</td>
+                        <td className="px-4 py-3 text-[var(--text-muted)]">{project.country || '—'}</td>
+                        <td className="px-4 py-3 text-[var(--text-muted)]">{project.operator || '—'}</td>
+                        <td className="px-4 py-3 text-[var(--text-muted)]">{project.surf_contractor || '—'}</td>
+                        <td className="px-4 py-3 font-mono text-white">{project.water_depth_category || '—'}</td>
+                        <td className="px-4 py-3 font-mono text-white">{(project.xmt_count || 0).toLocaleString('en-US')}</td>
+                        <td className="px-4 py-3 font-mono text-white">{Math.round(project.surf_km || 0).toLocaleString('en-US')}</td>
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>
@@ -622,22 +713,22 @@ export default function Dashboard() {
 
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Panel title="Regioner - verdenskart">
-            <MapSection countryData={activeCharts.byCountry} />
+            <MapSection countryData={viewCharts.byCountry} />
           </Panel>
 
           <Panel title="Vanndybde-fordeling">
-            {!activeCharts.byDepth.length ? (
+            {!viewCharts.byDepth.length ? (
               <LoadingPlaceholder />
             ) : (
               <div className="h-[360px]">
                 <ResponsiveContainer>
-                  <BarChart data={activeCharts.byDepth.slice(0, 10)}>
+                  <BarChart data={viewCharts.byDepth.slice(0, 10)}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
                     <XAxis dataKey="depth" axisLine={false} tickLine={false} angle={-25} textAnchor="end" height={70} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
                     <Tooltip content={<CompactTooltip />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
                     <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                      {activeCharts.byDepth.slice(0, 10).map((entry, index) => (
+                      {viewCharts.byDepth.slice(0, 10).map((entry, index) => (
                         <Cell key={`${entry.depth}-${index}`} fill={BAR_COLORS[index % BAR_COLORS.length]} />
                       ))}
                     </Bar>
@@ -649,13 +740,13 @@ export default function Dashboard() {
         </section>
 
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Panel title="Prosjekter per ar">
-            {!activeCharts.byYear.length ? (
+          <Panel title={view === 'historical' ? 'Awards per ar' : 'Prosjekter per ar'}>
+            {!viewCharts.byYear.length ? (
               <LoadingPlaceholder />
             ) : (
               <div className="h-[260px]">
                 <ResponsiveContainer>
-                  <BarChart data={activeCharts.byYear}>
+                  <BarChart data={viewCharts.byYear}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
                     <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
