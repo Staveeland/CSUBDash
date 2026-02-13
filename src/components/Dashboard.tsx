@@ -1,11 +1,15 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import dynamic from 'next/dynamic'
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  BarChart, Bar, Legend
+  BarChart, Bar,
 } from 'recharts'
+
+// Dynamic import for Leaflet (no SSR)
+const MapSection = dynamic(() => import('./MapSection'), { ssr: false })
 
 // ── Types ──────────────────────────────────────────
 interface Stats {
@@ -86,9 +90,12 @@ export default function Dashboard() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  const filteredProjects = searchQuery
-    ? projects.filter(p => Object.values(p).some(v => String(v).toLowerCase().includes(searchQuery.toLowerCase())))
-    : projects
+  const filteredProjects = useMemo(() =>
+    searchQuery
+      ? projects.filter(p => Object.values(p).some(v => String(v).toLowerCase().includes(searchQuery.toLowerCase())))
+      : projects,
+    [projects, searchQuery]
+  )
 
   const openDrawer = (p: Project) => { setSelectedProject(p); setDrawerOpen(true) }
   const closeDrawer = () => { setDrawerOpen(false); setTimeout(() => setSelectedProject(null), 300) }
@@ -139,9 +146,9 @@ export default function Dashboard() {
             { label: 'Totale XMTs', value: stats?.totalXmts },
             { label: 'Regioner', value: stats?.regionCount },
           ].map((kpi, i) => (
-            <div key={i} className="relative overflow-hidden rounded-xl bg-white p-5 transition-all hover:-translate-y-0.5 cursor-default" style={{ boxShadow: 'var(--shadow)', animation: `fadeInUp .5s ease forwards`, animationDelay: `${i * 0.05}s` }}>
+            <div key={i} className="relative overflow-hidden rounded-xl bg-white transition-all hover:-translate-y-0.5 cursor-default" style={{ boxShadow: 'var(--shadow)', padding: '20px 24px', animation: `fadeInUp .5s ease forwards`, animationDelay: `${i * 0.05}s` }}>
               <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: 'linear-gradient(90deg, #2d7368, #4db89e)' }} />
-              <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{kpi.label}</div>
+              <div className="text-xs font-semibold uppercase tracking-wider mb-1.5 whitespace-nowrap" style={{ color: 'var(--text-secondary)', letterSpacing: '0.8px' }}>{kpi.label}</div>
               <div className="mono text-[32px] font-medium" style={{ color: '#1a3c34' }}>{loading ? '—' : (kpi.value ?? '—')}</div>
             </div>
           ))}
@@ -149,15 +156,15 @@ export default function Dashboard() {
 
         {/* ── PIPELINE ── */}
         <Card title="Salgspipeline" icon="📊" className="mb-5">
-          <div className="flex items-center gap-0">
+          <div className="flex items-center my-3">
             {['FEED','Bud på bud','Tildeling','CSUB direkte kontakt','CSUB Contract Award'].map((label, i) => (
               <div key={label} className="contents">
-                {i > 0 && <div className="w-6 text-center text-lg shrink-0" style={{ color: '#4db89e' }}>→</div>}
-                <div className={`flex-1 text-center py-4 px-2 transition-colors hover:bg-green-200/40 cursor-default ${i === 0 ? 'rounded-l-lg' : ''} ${i === 4 ? 'rounded-r-lg' : ''}`} style={{ background: i % 2 === 0 ? '#f0faf6' : '#e0f5ef' }}>
+                {i > 0 && <div className="w-8 text-center text-lg shrink-0 flex items-center justify-center" style={{ color: '#4db89e' }}>→</div>}
+                <div className={`flex-1 text-center transition-colors hover:bg-green-200/40 cursor-default ${i === 0 ? 'rounded-l-lg' : ''} ${i === 4 ? 'rounded-r-lg' : ''}`} style={{ background: i % 2 === 0 ? '#f0faf6' : '#e0f5ef', padding: '16px 12px' }}>
                   <div className="mono text-[28px] font-medium" style={{ color: '#1a3c34' }}>
                     {loading ? '...' : (i === 0 ? filteredProjects.length : '—')}
                   </div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide mt-1" style={{ color: 'var(--text-secondary)' }}>{label}</div>
+                  <div className="text-[11px] font-semibold uppercase mt-1" style={{ color: 'var(--text-secondary)', letterSpacing: '0.3px' }}>{label}</div>
                   <div className="h-1 rounded-sm mt-2" style={{ background: '#b5e8d9' }}>
                     <div className="h-full rounded-sm transition-all duration-700" style={{ background: 'linear-gradient(90deg, #2d7368, #4db89e)', width: i === 0 ? '100%' : '0%' }} />
                   </div>
@@ -173,7 +180,7 @@ export default function Dashboard() {
           <Card title="Kontrakter etter fase" icon="🎯">
             {!charts ? <LoadingPlaceholder /> : (
               <div className="flex items-center gap-4">
-                <div className="w-[160px] h-[160px] shrink-0">
+                <div className="w-[140px] h-[140px] shrink-0">
                   <ResponsiveContainer>
                     <PieChart>
                       <Pie data={charts.byPhase.slice(0, 6)} dataKey="count" nameKey="phase" cx="50%" cy="50%" innerRadius={35} outerRadius={60} strokeWidth={0}>
@@ -200,7 +207,7 @@ export default function Dashboard() {
           <Card title="Regional fordeling" icon="🌍">
             {!charts ? <LoadingPlaceholder /> : (
               <div className="flex items-center gap-4">
-                <div className="w-[160px] h-[160px] shrink-0">
+                <div className="w-[140px] h-[140px] shrink-0">
                   <ResponsiveContainer>
                     <PieChart>
                       <Pie data={charts.byCountry.slice(0, 6)} dataKey="count" nameKey="country" cx="50%" cy="50%" innerRadius={35} outerRadius={60} strokeWidth={0}>
@@ -249,10 +256,10 @@ export default function Dashboard() {
 
         {/* ── COMPANY SECTIONS ── */}
         {/* Installasjonsselskaper */}
-        <div className="bg-white rounded-xl mb-5 p-6" style={{ boxShadow: 'var(--shadow)', border: '2px solid #b5e8d9', borderTop: '4px solid #2d7368' }}>
-          <div className="flex items-center gap-2.5 mb-3.5">
+        <div className="bg-white rounded-xl mb-5" style={{ boxShadow: 'var(--shadow)', border: '2px solid #b5e8d9', borderTop: '4px solid #2d7368', padding: '24px' }}>
+          <div className="flex items-center gap-2.5 mb-4">
             <span className="text-[22px]">🔧</span>
-            <h3 className="text-[16px]" style={{ color: '#1a3c34' }}>Installasjonsselskaper</h3>
+            <h3 className="text-[16px]" style={{ color: '#1a3c34', fontFamily: 'Source Serif 4, serif' }}>Installasjonsselskaper</h3>
             <span className="text-xs italic" style={{ color: 'var(--text-secondary)' }}>— CSUB sine kunder</span>
             <span className="ml-auto text-[10px] px-2.5 py-0.5 rounded-xl font-semibold uppercase tracking-wide" style={{ background: '#e0f5ef', color: '#245a4e' }}>
               {companies?.contractors?.length || 0} selskaper
@@ -263,7 +270,7 @@ export default function Dashboard() {
               {companies.contractors.slice(0, 8).map(c => {
                 const maxCount = Math.max(...companies.contractors.map(x => x.count), 1)
                 return (
-                  <div key={c.name} className="rounded-lg p-4 flex flex-col items-center text-center transition-all hover:-translate-y-0.5 cursor-default" style={{ background: 'linear-gradient(135deg, #f0faf6, #fff)', border: '2px solid #b5e8d9', boxShadow: 'var(--shadow)' }}>
+                  <div key={c.name} className="rounded-lg flex flex-col items-center text-center transition-all hover:-translate-y-0.5 cursor-default" style={{ background: 'linear-gradient(135deg, #f0faf6, #fff)', border: '2px solid #b5e8d9', boxShadow: 'var(--shadow)', padding: '16px' }}>
                     <div className="text-sm font-bold" style={{ color: '#1a3c34' }}>{c.name}</div>
                     <div className="mono text-[22px] font-semibold" style={{ color: '#245a4e' }}>{c.count}</div>
                     <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>kontrakter</div>
@@ -279,16 +286,16 @@ export default function Dashboard() {
 
         {/* FEED + Operators row */}
         <div className="grid grid-cols-2 gap-5 mb-5 max-[768px]:grid-cols-1">
-          <Card title="" className="!p-6">
-            <div className="flex items-center gap-2.5 mb-3.5">
+          <div className="bg-white rounded-xl" style={{ boxShadow: 'var(--shadow)', padding: '24px' }}>
+            <div className="flex items-center gap-2.5 mb-4">
               <span className="text-[18px]">📐</span>
-              <h3 className="text-[15px]" style={{ color: '#1a3c34' }}>FEED-selskaper</h3>
+              <h3 className="text-[15px]" style={{ color: '#1a3c34', fontFamily: 'Source Serif 4, serif' }}>FEED-selskaper</h3>
               <span className="text-xs italic" style={{ color: 'var(--text-secondary)' }}>— fremtidige kunder</span>
             </div>
             {!companies ? <LoadingPlaceholder /> : (
               <div className="grid grid-cols-2 gap-3 max-[768px]:grid-cols-1">
                 {companies.contractors.slice(0, 4).map(c => (
-                  <div key={c.name} className="rounded-lg p-3 flex flex-col items-center text-center transition-all hover:-translate-y-0.5 bg-white cursor-default" style={{ border: '1.5px solid var(--border)' }}>
+                  <div key={c.name} className="rounded-lg flex flex-col items-center text-center transition-all hover:-translate-y-0.5 bg-white cursor-default" style={{ border: '1.5px solid var(--border)', padding: '12px' }}>
                     <div className="text-[13px] font-semibold" style={{ color: '#245a4e' }}>{c.name}</div>
                     <div className="mono text-[18px] font-semibold" style={{ color: '#2d7368' }}>{c.count}</div>
                     <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>kontrakter</div>
@@ -296,10 +303,10 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
-          </Card>
+          </div>
 
-          <div className="rounded-xl p-6" style={{ background: '#f0faf6', boxShadow: 'var(--shadow)' }}>
-            <div className="flex items-center gap-2.5 mb-3.5">
+          <div className="rounded-xl" style={{ background: '#f0faf6', boxShadow: 'var(--shadow)', padding: '24px' }}>
+            <div className="flex items-center gap-2.5 mb-4">
               <span className="text-[16px]">🏭</span>
               <h3 className="text-[14px]" style={{ color: 'var(--text-secondary)', fontFamily: 'Source Serif 4, serif' }}>Operatørselskaper</h3>
               <span className="text-xs italic" style={{ color: 'var(--text-secondary)' }}>— bakgrunnsinformasjon</span>
@@ -307,7 +314,7 @@ export default function Dashboard() {
             {!companies ? <LoadingPlaceholder /> : (
               <div className="grid grid-cols-3 gap-3 max-[768px]:grid-cols-1">
                 {companies.operators.slice(0, 9).map(o => (
-                  <div key={o.name} className="rounded-lg px-3 py-2.5 flex justify-between items-center cursor-default" style={{ background: '#f0faf6', border: '1px solid var(--border)' }}>
+                  <div key={o.name} className="rounded-lg flex justify-between items-center cursor-default" style={{ background: '#f0faf6', border: '1px solid var(--border)', padding: '10px 12px' }}>
                     <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{o.name}</span>
                     <span className="mono text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{o.count}</span>
                   </div>
@@ -354,8 +361,12 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {/* ── DEPTH + YEAR CHARTS ── */}
+        {/* ── MAP + DEPTH ── */}
         <div className="grid grid-cols-2 gap-5 mb-5 max-[768px]:grid-cols-1">
+          <Card title="Regioner — verdenskart" icon="🌍">
+            <MapSection countryData={charts?.byCountry || []} />
+          </Card>
+
           <Card title="Vanndybde-fordeling" icon="🌊">
             {!charts ? <LoadingPlaceholder /> : (
               <div className="h-[200px]">
@@ -373,7 +384,10 @@ export default function Dashboard() {
               </div>
             )}
           </Card>
+        </div>
 
+        {/* ── YEAR CHART + DOCUMENT UPLOAD ── */}
+        <div className="grid grid-cols-2 gap-5 mb-5 max-[768px]:grid-cols-1">
           <Card title="Prosjekter per år" icon="📅">
             {!charts ? <LoadingPlaceholder /> : (
               <div className="h-[200px]">
@@ -389,12 +403,11 @@ export default function Dashboard() {
               </div>
             )}
           </Card>
-        </div>
 
-        {/* ── DOCUMENT UPLOAD ── */}
-        <Card title="Dokumentopplasting" icon="📄" className="mb-5">
-          <DropZone />
-        </Card>
+          <Card title="Dokumentopplasting" icon="📄">
+            <DropZone />
+          </Card>
+        </div>
 
       </main>
 
@@ -433,9 +446,9 @@ export default function Dashboard() {
 // ── Sub-components ─────────────────────────────────
 function Card({ title, icon, children, className = '' }: { title: string; icon?: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={`bg-white rounded-xl p-6 transition-shadow hover:shadow-lg ${className}`} style={{ boxShadow: 'var(--shadow)' }}>
+    <div className={`bg-white rounded-xl transition-shadow hover:shadow-lg ${className}`} style={{ boxShadow: 'var(--shadow)', padding: '24px' }}>
       {title && (
-        <div className="flex items-center justify-between mb-4 text-[13px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+        <div className="flex items-center justify-between mb-4 text-[13px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)', letterSpacing: '1px' }}>
           {title} {icon && <span className="text-[16px]">{icon}</span>}
         </div>
       )}
@@ -468,7 +481,7 @@ function DropZone() {
   return (
     <div
       className="rounded-xl p-10 text-center cursor-pointer transition-colors flex flex-col items-center justify-center"
-      style={{ border: '2px dashed #7dd4bf', background: '#f0faf6', color: 'var(--text-secondary)' }}
+      style={{ border: '2px dashed #7dd4bf', background: '#f0faf6', color: 'var(--text-secondary)', minHeight: '160px' }}
       onDragOver={e => { e.preventDefault(); (e.currentTarget as HTMLElement).style.borderColor = '#38917f'; (e.currentTarget as HTMLElement).style.background = '#e0f5ef' }}
       onDragLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#7dd4bf'; (e.currentTarget as HTMLElement).style.background = '#f0faf6' }}
       onDrop={e => { e.preventDefault(); setDropped(true) }}
