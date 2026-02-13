@@ -86,6 +86,35 @@ function normalize(input: string | undefined): string {
   return (input ?? '').trim().toLowerCase()
 }
 
+function parseYearValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const numeric = Number(trimmed)
+    if (!Number.isNaN(numeric) && numeric > 1900 && numeric < 2200) return numeric
+    const date = new Date(trimmed)
+    if (!Number.isNaN(date.getTime())) return date.getUTCFullYear()
+  }
+  return null
+}
+
+function getProjectYear(project: Project): number | null {
+  const candidates: unknown[] = [
+    project.first_year,
+    project.last_year,
+    project.award_date,
+    project.created_at,
+  ]
+
+  for (const candidate of candidates) {
+    const parsed = parseYearValue(candidate)
+    if (parsed) return parsed
+  }
+
+  return null
+}
+
 function buildProjectKey(project: Project): string {
   const raw = `${project.development_project || project.asset || 'project'}-${project.country || 'country'}-${project.first_year || project.last_year || 'year'}-${project.operator || 'operator'}`
   return raw.toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -103,7 +132,7 @@ function buildChartsFromProjects(source: Project[]): Charts {
     phaseMap.set(phase, (phaseMap.get(phase) ?? 0) + 1)
     const depth = project.water_depth_category || 'Unknown'
     depthMap.set(depth, (depthMap.get(depth) ?? 0) + 1)
-    const year = project.first_year || project.last_year
+    const year = getProjectYear(project)
     if (year) yearMap.set(year, (yearMap.get(year) ?? 0) + 1)
   })
 
@@ -157,7 +186,7 @@ function buildPipelineByYear(source: Project[]): PipelinePoint[] {
   const pipelineByYear = new Map<number, number>()
 
   source.forEach((project) => {
-    const year = project.first_year || project.last_year
+    const year = getProjectYear(project)
     if (!year) return
     const surfValue = Math.max(0, project.surf_km || 0) * 1_000_000
     const xmtValue = Math.max(0, project.xmt_count || 0) * 120_000
@@ -245,7 +274,7 @@ export default function Dashboard() {
 
   const viewProjects = useMemo(() => {
     return regionProjects.filter((project) => {
-      const year = project.first_year || project.last_year
+      const year = getProjectYear(project)
       if (!year) return view === 'historical'
       if (view === 'historical') return year <= currentYear
       return year > currentYear
@@ -293,7 +322,7 @@ export default function Dashboard() {
     })
 
     const upcomingAwards = viewProjects.filter((project) => {
-      const year = project.first_year || project.last_year || 0
+      const year = getProjectYear(project) || 0
       if (view === 'historical') return year >= currentYear - 1 && year <= currentYear
       return year >= currentYear
     }).length
