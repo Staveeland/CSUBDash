@@ -47,12 +47,23 @@ function UploadZone({
   const [result, setResult] = useState<ImportResult | null>(null)
   const [dragOver, setDragOver] = useState(false)
 
+  const maxSizeBytes = endpoint.includes('excel') ? 10 * 1024 * 1024 : 25 * 1024 * 1024
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
     const dropped = e.dataTransfer.files[0]
-    if (dropped) setFile(dropped)
-  }, [])
+    if (!dropped) return
+    if (dropped.size > maxSizeBytes) {
+      setResult({
+        success: false,
+        error: `Filen er for stor. Maks ${Math.round(maxSizeBytes / 1024 / 1024)}MB.`,
+      })
+      return
+    }
+    setResult(null)
+    setFile(dropped)
+  }, [maxSizeBytes])
 
   const handleUpload = async () => {
     if (!file) return
@@ -124,10 +135,19 @@ function UploadZone({
         onClick={() => {
           const input = document.createElement('input')
           input.type = 'file'
-          input.accept = endpoint.includes('excel') ? '.xlsx,.xls' : '.pdf'
+          input.accept = endpoint.includes('excel') ? '.xlsx' : '.pdf'
           input.onchange = (event) => {
             const selected = (event.target as HTMLInputElement).files?.[0]
-            if (selected) setFile(selected)
+            if (!selected) return
+            if (selected.size > maxSizeBytes) {
+              setResult({
+                success: false,
+                error: `Filen er for stor. Maks ${Math.round(maxSizeBytes / 1024 / 1024)}MB.`,
+              })
+              return
+            }
+            setResult(null)
+            setFile(selected)
           }
           input.click()
         }}
@@ -141,6 +161,7 @@ function UploadZone({
           <p className="text-gray-400">Drop file here or click to select</p>
         )}
       </div>
+      <p className="mt-2 text-xs text-gray-500">Maks filstørrelse: {Math.round(maxSizeBytes / 1024 / 1024)}MB</p>
 
       <button
         onClick={handleUpload}

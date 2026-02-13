@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { processImportJob } from '@/lib/import/processors'
+import { requireAllowedApiUser } from '@/lib/auth/require-user'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
   const expectedSecret = process.env.IMPORT_WORKER_SECRET
-  if (expectedSecret && request.headers.get('x-import-secret') !== expectedSecret) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const providedSecret = request.headers.get('x-import-secret')
+  const isTrustedWorkerRequest = Boolean(expectedSecret && providedSecret === expectedSecret)
+
+  if (!isTrustedWorkerRequest) {
+    const auth = await requireAllowedApiUser()
+    if (!auth.ok) return auth.response
   }
 
   try {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createAdminClient as createClient } from '@/lib/supabase/admin'
+import { requireAllowedApiUser } from '@/lib/auth/require-user'
 
 function parseYear(value: string | null | undefined): number | null {
   if (!value) return null
@@ -12,16 +12,45 @@ function parseYear(value: string | null | undefined): number | null {
 
 export async function GET() {
   try {
-    const supabase = createClient()
+    const auth = await requireAllowedApiUser()
+    if (!auth.ok) return auth.response
+    const supabase = auth.supabase
 
     const [projectsRes, contractsRes] = await Promise.all([
       supabase
         .from('projects')
-        .select('*')
+        .select(`
+          development_project,
+          asset,
+          country,
+          continent,
+          operator,
+          surf_contractor,
+          facility_category,
+          water_depth_category,
+          xmt_count,
+          surf_km,
+          first_year,
+          last_year,
+          created_at
+        `)
         .limit(5000),
       supabase
         .from('contracts')
-        .select('*')
+        .select(`
+          project_name,
+          title,
+          contract_name,
+          description,
+          contract_type,
+          country,
+          region,
+          operator,
+          contractor,
+          award_date,
+          created_at,
+          water_depth_m
+        `)
         .limit(5000),
     ])
 
@@ -40,9 +69,19 @@ export async function GET() {
       const firstYear = project.first_year || parseYear(project.created_at)
       const lastYear = project.last_year || firstYear
       return {
-        ...project,
+        development_project: project.development_project || project.asset || 'Unknown project',
+        asset: project.asset || '',
+        country: project.country || 'Unknown',
+        continent: project.continent || 'Unknown',
+        operator: project.operator || '',
+        surf_contractor: project.surf_contractor || '',
+        facility_category: project.facility_category || 'Unknown',
+        water_depth_category: project.water_depth_category || 'Unknown',
+        xmt_count: project.xmt_count || 0,
+        surf_km: project.surf_km || 0,
         first_year: firstYear,
         last_year: lastYear,
+        created_at: project.created_at || null,
         data_source: 'project',
       }
     })
@@ -53,18 +92,19 @@ export async function GET() {
 
       return {
         development_project: projectName || contract.contract_type || 'Contract',
-        asset: contract.asset || contract.contract_type || 'Contract',
+        asset: contract.contract_type || 'Contract',
         country: contract.country || 'Unknown',
         continent: contract.region || 'Unknown',
         operator: contract.operator || '',
         surf_contractor: contract.contractor || '',
         facility_category: contract.contract_type || 'Contract',
-        water_depth_category: contract.water_depth_category || 'Unknown',
+        water_depth_category: typeof contract.water_depth_m === 'number' ? `${contract.water_depth_m} m` : 'Unknown',
         xmt_count: 0,
         surf_km: 0,
         first_year: contractYear,
         last_year: contractYear,
         award_date: contract.award_date || null,
+        created_at: contract.created_at || null,
         data_source: 'contract',
       }
     })

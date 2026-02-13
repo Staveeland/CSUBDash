@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAllowedApiUser } from '@/lib/auth/require-user'
 
 export async function GET() {
-  const supabase = createAdminClient()
+  const auth = await requireAllowedApiUser()
+  if (!auth.ok) return auth.response
+
+  const supabase = auth.supabase
   const { data, error } = await supabase
     .from('import_jobs')
     .select(`

@@ -1,18 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
 import { queueImportJob, triggerImportProcessor } from '@/lib/import/jobs'
+import { requireAllowedApiUser } from '@/lib/auth/require-user'
+import { validateQueuedUploadInput } from '@/lib/import/validate-upload'
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAllowedApiUser()
+  if (!auth.ok) return auth.response
+
   try {
     const body = await request.json()
-    const fileName = body?.file_name as string | undefined
-    const storagePath = body?.storage_path as string | undefined
-    const storageBucket = (body?.storage_bucket as string | undefined) || 'imports'
-    const fileSizeBytes = (body?.file_size_bytes as number | undefined) ?? null
+    const validation = validateQueuedUploadInput(body ?? {}, {
+      allowedExtensions: ['.xlsx'],
+      maxBytes: 10 * 1024 * 1024,
+    })
 
-    if (!fileName || !storagePath) {
-      return NextResponse.json({ error: 'Missing file_name or storage_path' }, { status: 400 })
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: validation.status })
     }
+
+    const { fileName, storagePath, storageBucket, fileSizeBytes } = validation.normalized
 
     const job = await queueImportJob({
       fileName,

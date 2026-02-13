@@ -8,6 +8,10 @@ export function isAllowedEmailDomain(email: string | null | undefined): boolean 
   return ALLOWED_EMAIL_DOMAINS.has(domain)
 }
 
+export function isAllowed(email: string | null | undefined): boolean {
+  return isAllowedEmailDomain(email)
+}
+
 export function getAllowedEmailDomains(): string[] {
   return Array.from(ALLOWED_EMAIL_DOMAINS)
 }
