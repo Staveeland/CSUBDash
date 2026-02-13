@@ -42,16 +42,16 @@ export default function MicrosoftLoginButton({ nextPath }: { nextPath?: string }
   }
 
   return (
-    <div className="w-full max-w-sm">
+    <div className="w-full max-w-sm mx-auto">
       <button
         type="button"
         onClick={signIn}
         disabled={loading}
-        className="w-full rounded-lg bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold px-4 py-3 hover:brightness-110 disabled:opacity-70 disabled:cursor-not-allowed transition cursor-pointer"
+        className="w-full rounded-lg bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold px-5 py-3 hover:brightness-110 disabled:opacity-70 disabled:cursor-not-allowed transition cursor-pointer shadow-[0_8px_20px_rgba(77,184,158,0.25)]"
       >
         {loading ? 'Sender deg til Microsoft...' : 'Logg inn med Microsoft 365'}
       </button>
-      {error && <p className="mt-3 text-xs text-red-300">{error}</p>}
+      {error && <p className="mt-3 text-xs text-red-300 text-center">{error}</p>}
     </div>
   )
 }
