@@ -56,7 +56,6 @@ type ProjectNodeData = Dashboard3DProps['projects'][number] & {
   glowColor: THREE.Color
   brightColor: THREE.Color
   dimColor: THREE.Color
-  randomOffset: number
 }
 
 type ForecastPoint = Dashboard3DProps['forecasts'][number]
@@ -145,50 +144,62 @@ function ProjectInstance({
   isDimmed,
   isHovered,
   isSelected,
+}: {
+  data: ProjectNodeData
+  isDimmed: boolean
+  isHovered: boolean
+  isSelected: boolean
+}) {
+  const color = isDimmed ? data.dimColor : isHovered || isSelected ? data.brightColor : data.glowColor
+  const scale = isSelected ? data.scale * 1.6 : isHovered ? data.scale * 1.3 : data.scale
+
+  return (
+    <Instance
+      position={data.basePos}
+      scale={scale}
+      color={color}
+    />
+  )
+}
+
+function ProjectHitTarget({
+  data,
+  isDimmed,
   onClick,
   onHover,
   onPointerOut,
 }: {
   data: ProjectNodeData
   isDimmed: boolean
-  isHovered: boolean
-  isSelected: boolean
   onClick: (d: ProjectNodeData) => void
   onHover: (d: ProjectNodeData) => void
   onPointerOut: () => void
 }) {
-  const ref = useRef<THREE.Object3D>(null)
-
-  useFrame((state) => {
-    if (ref.current && !isSelected) {
-      ref.current.position.y = data.basePos.y + Math.sin(state.clock.elapsedTime * 2 + data.randomOffset) * 0.5
-    }
-  })
-
-  const color = isDimmed ? data.dimColor : isHovered || isSelected ? data.brightColor : data.glowColor
-  const scale = isSelected ? data.scale * 1.6 : isHovered ? data.scale * 1.3 : data.scale
+  const hitRadius = Math.max(0.8, data.scale * 0.85)
 
   return (
-    <Instance
-      ref={ref as unknown as React.RefObject<THREE.Object3D>}
+    <mesh
       position={data.basePos}
-      scale={scale}
-      color={color}
       onClick={(event) => {
+        if (isDimmed) return
         event.stopPropagation()
         onClick(data)
       }}
       onPointerOver={(event) => {
+        if (isDimmed) return
         event.stopPropagation()
         document.body.style.cursor = 'pointer'
-        if (!isDimmed) onHover(data)
+        onHover(data)
       }}
       onPointerOut={(event) => {
         event.stopPropagation()
         document.body.style.cursor = 'auto'
         onPointerOut()
       }}
-    />
+    >
+      <sphereGeometry args={[hitRadius, 14, 14]} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+    </mesh>
   )
 }
 
@@ -518,9 +529,11 @@ function ReportNode({
 function CameraManager({
   selectedProject,
   controlsRef,
+  isInteracting,
 }: {
   selectedProject: ProjectNodeData | null
   controlsRef: React.RefObject<OrbitControlsImpl | null>
+  isInteracting: boolean
 }) {
   const { camera } = useThree()
   const targetPosRef = useRef<THREE.Vector3 | null>(null)
@@ -534,9 +547,15 @@ function CameraManager({
       return
     }
 
-    targetPosRef.current = ORBIT_CENTER.clone()
-    cameraPosRef.current = DEFAULT_CAMERA_POSITION.clone()
+    targetPosRef.current = null
+    cameraPosRef.current = null
   }, [selectedProject])
+
+  useEffect(() => {
+    if (!isInteracting) return
+    targetPosRef.current = null
+    cameraPosRef.current = null
+  }, [isInteracting])
 
   useFrame(() => {
     const targetPos = targetPosRef.current
@@ -588,7 +607,6 @@ function Scene({
       const randomA = seededValue(seedBase, 11)
       const randomB = seededValue(seedBase, 23)
       const randomC = seededValue(seedBase, 37)
-      const randomD = seededValue(seedBase, 53)
 
       const radius = 12 * Math.cbrt(Math.max(0.0001, randomA))
       const theta = randomB * 2 * Math.PI
@@ -608,7 +626,6 @@ function Scene({
         glowColor: getGlowColor(colorHex, 1.5),
         brightColor: getGlowColor(colorHex, 4),
         dimColor: new THREE.Color('#081210'),
-        randomOffset: randomD * Math.PI * 2,
       }
     })
   }, [projects])
@@ -633,14 +650,16 @@ function Scene({
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 20, 10]} intensity={1} />
 
-      <CameraManager selectedProject={selectedProject} controlsRef={controlsRef} />
+      <CameraManager selectedProject={selectedProject} controlsRef={controlsRef} isInteracting={isInteracting} />
 
       <OrbitControls
         ref={controlsRef}
         makeDefault
+        target={[ORBIT_CENTER.x, ORBIT_CENTER.y, ORBIT_CENTER.z]}
         autoRotate={!isInteracting && !selectedProject && !selectedReport}
         autoRotateSpeed={0.5}
         enableDamping
+        enablePan={false}
         maxPolarAngle={Math.PI / 2 - 0.05}
         onStart={() => setIsInteracting(true)}
         onEnd={() => setIsInteracting(false)}
@@ -696,16 +715,28 @@ function Scene({
                 isDimmed={isDimmed}
                 isHovered={isHovered}
                 isSelected={isSelected}
-                onClick={(nextSelected) => {
-                  setSelectedReport(null)
-                  setSelectedProject(nextSelected)
-                }}
-                onHover={setHoveredProject}
-                onPointerOut={() => setHoveredProject(null)}
               />
             )
           })}
         </Instances>
+      )}
+
+      {projectNodes.length > 0 && (
+        <group>
+          {projectNodes.map((project) => (
+            <ProjectHitTarget
+              key={`hit-${project.id}`}
+              data={project}
+              isDimmed={checkDimmed(project)}
+              onClick={(nextSelected) => {
+                setSelectedReport(null)
+                setSelectedProject(nextSelected)
+              }}
+              onHover={setHoveredProject}
+              onPointerOut={() => setHoveredProject(null)}
+            />
+          ))}
+        </group>
       )}
 
       <ConnectionLines projects={projectNodes} isDimmed={checkDimmed} />
@@ -880,7 +911,7 @@ export default function Dashboard3D({
       </div>
 
       <Canvas
-        camera={{ position: [0, 30, 80], fov: 45 }}
+        camera={{ position: [DEFAULT_CAMERA_POSITION.x, DEFAULT_CAMERA_POSITION.y, DEFAULT_CAMERA_POSITION.z], fov: 45 }}
         onPointerMissed={() => {
           setSelectedProject(null)
           setSelectedReport(null)
