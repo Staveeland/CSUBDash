@@ -43,47 +43,14 @@ export async function queueImportJob(input: {
   return data as QueuedImportJob
 }
 
-export async function triggerImportProcessor(jobId: string, origin: string): Promise<void> {
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-
-  if (serviceRoleKey && supabaseUrl) {
-    try {
-      const edgeResponse = await fetch(`${supabaseUrl}/functions/v1/process-import-job`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${serviceRoleKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ job_id: jobId }),
-      })
-
-      if (edgeResponse.ok) {
-        return
-      }
-
-      console.error('Edge worker trigger failed:', edgeResponse.status, await edgeResponse.text())
-    } catch (error) {
-      console.error('Edge worker trigger error:', error)
-    }
-  }
+export async function triggerImportProcessor(jobId: string, _origin?: string): Promise<void> {
+  // Import dynamically to avoid circular deps at module load time
+  const { processImportJob } = await import('@/lib/import/processors')
 
   try {
-    const headers: HeadersInit = { 'Content-Type': 'application/json' }
-    if (process.env.IMPORT_WORKER_SECRET) {
-      headers['x-import-secret'] = process.env.IMPORT_WORKER_SECRET
-    }
-
-    const localResponse = await fetch(`${origin}/api/import/process`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ job_id: jobId }),
-    })
-
-    if (!localResponse.ok) {
-      console.error('Local import processor failed:', localResponse.status, await localResponse.text())
-    }
+    const result = await processImportJob(jobId)
+    console.log(`Import job ${jobId} completed: ${result.recordsImported}/${result.recordsTotal} records`)
   } catch (error) {
-    console.error('Local import processor error:', error)
+    console.error(`Import job ${jobId} failed:`, error)
   }
 }
