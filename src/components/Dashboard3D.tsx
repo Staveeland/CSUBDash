@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useState, useEffect, type CSSProperties } from 'react'
 import * as THREE from 'three'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, useFrame } from '@react-three/fiber'
 import {
   OrbitControls,
   Instances,
@@ -12,6 +12,7 @@ import {
   Grid,
   MeshReflectorMaterial,
   Sparkles,
+  useCursor,
 } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
@@ -175,29 +176,32 @@ function ProjectHitTarget({
   onHover: (d: ProjectNodeData) => void
   onPointerOut: () => void
 }) {
-  const hitRadius = Math.max(0.8, data.scale * 0.85)
+  const [hovered, setHovered] = useState(false)
+  useCursor(hovered && !isDimmed, 'pointer', 'auto')
+
+  const hitSize = Math.max(0.65, data.scale * 0.95)
 
   return (
     <mesh
       position={data.basePos}
       onClick={(event) => {
-        if (isDimmed) return
         event.stopPropagation()
+        if (isDimmed) return
         onClick(data)
       }}
       onPointerOver={(event) => {
-        if (isDimmed) return
         event.stopPropagation()
-        document.body.style.cursor = 'pointer'
+        if (isDimmed) return
+        setHovered(true)
         onHover(data)
       }}
       onPointerOut={(event) => {
         event.stopPropagation()
-        document.body.style.cursor = 'auto'
+        setHovered(false)
         onPointerOut()
       }}
     >
-      <sphereGeometry args={[hitRadius, 14, 14]} />
+      <boxGeometry args={[hitSize, hitSize, hitSize]} />
       <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
     </mesh>
   )
@@ -338,6 +342,9 @@ function TimelineBar({
   color: THREE.Color
 }) {
   const [hovered, setHovered] = useState(false)
+  useCursor(hovered, 'pointer', 'auto')
+  const hitWidth = 2.8
+  const hitDepth = 2.8
 
   return (
     <group position={position} rotation={rotation}>
@@ -370,7 +377,7 @@ function TimelineBar({
       </Text>
 
       {hovered && (
-        <Html center position={[0, height / 2 + 2, 0]} zIndexRange={[100, 0]}>
+        <Html center position={[0, height / 2 + 2, 0]} zIndexRange={[100, 0]} style={{ pointerEvents: 'none' }}>
           <div
             style={{
               background: 'rgba(10,23,20,0.95)',
@@ -393,6 +400,23 @@ function TimelineBar({
           </div>
         </Html>
       )}
+
+      <mesh
+        onClick={(event) => {
+          event.stopPropagation()
+        }}
+        onPointerOver={(event) => {
+          event.stopPropagation()
+          setHovered(true)
+        }}
+        onPointerOut={(event) => {
+          event.stopPropagation()
+          setHovered(false)
+        }}
+      >
+        <boxGeometry args={[hitWidth, Math.max(1.2, height + 1.2), hitDepth]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
     </group>
   )
 }
@@ -447,6 +471,7 @@ function ReportNode({
   onSelect: (report: ReportPoint) => void
 }) {
   const [hovered, setHovered] = useState(false)
+  useCursor(hovered, 'pointer', 'auto')
   const planeRef = useRef<THREE.Group>(null)
 
   useFrame((state) => {
@@ -464,16 +489,32 @@ function ReportNode({
         onPointerOver={(event) => {
           event.stopPropagation()
           setHovered(true)
-          document.body.style.cursor = 'pointer'
         }}
         onPointerOut={(event) => {
           event.stopPropagation()
           setHovered(false)
-          document.body.style.cursor = 'auto'
         }}
       >
         <planeGeometry args={[16, 9]} />
         <meshBasicMaterial color={THEME.background} transparent opacity={0.8} side={THREE.DoubleSide} />
+      </mesh>
+
+      <mesh
+        onClick={(event) => {
+          event.stopPropagation()
+          onSelect(report)
+        }}
+        onPointerOver={(event) => {
+          event.stopPropagation()
+          setHovered(true)
+        }}
+        onPointerOut={(event) => {
+          event.stopPropagation()
+          setHovered(false)
+        }}
+      >
+        <planeGeometry args={[20, 12]} />
+        <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
       </mesh>
 
       <lineSegments>
@@ -526,55 +567,6 @@ function ReportNode({
   )
 }
 
-function CameraManager({
-  selectedProject,
-  controlsRef,
-  isInteracting,
-}: {
-  selectedProject: ProjectNodeData | null
-  controlsRef: React.RefObject<OrbitControlsImpl | null>
-  isInteracting: boolean
-}) {
-  const { camera } = useThree()
-  const targetPosRef = useRef<THREE.Vector3 | null>(null)
-  const cameraPosRef = useRef<THREE.Vector3 | null>(null)
-
-  useEffect(() => {
-    if (selectedProject) {
-      const target = selectedProject.basePos.clone()
-      targetPosRef.current = target
-      cameraPosRef.current = new THREE.Vector3(target.x + 10, target.y + 10, target.z + 15)
-      return
-    }
-
-    targetPosRef.current = null
-    cameraPosRef.current = null
-  }, [selectedProject])
-
-  useEffect(() => {
-    if (!isInteracting) return
-    targetPosRef.current = null
-    cameraPosRef.current = null
-  }, [isInteracting])
-
-  useFrame(() => {
-    const targetPos = targetPosRef.current
-    const cameraPos = cameraPosRef.current
-    if (!targetPos || !cameraPos || !controlsRef.current) return
-
-    camera.position.lerp(cameraPos, 0.05)
-    controlsRef.current.target.lerp(targetPos, 0.05)
-    controlsRef.current.update()
-
-    if (camera.position.distanceTo(cameraPos) < 0.5 && controlsRef.current.target.distanceTo(targetPos) < 0.2) {
-      targetPosRef.current = null
-      cameraPosRef.current = null
-    }
-  })
-
-  return null
-}
-
 function Scene({
   projects,
   forecasts,
@@ -582,21 +574,21 @@ function Scene({
   searchTerm,
   selectedProject,
   setSelectedProject,
-  selectedReport,
   setSelectedReport,
-  isInteracting,
-  setIsInteracting,
 }: Dashboard3DProps & {
   searchTerm: string
   selectedProject: ProjectNodeData | null
   setSelectedProject: (project: ProjectNodeData | null) => void
-  selectedReport: Dashboard3DProps['reports'][number] | null
   setSelectedReport: (report: Dashboard3DProps['reports'][number] | null) => void
-  isInteracting: boolean
-  setIsInteracting: (value: boolean) => void
 }) {
   const [hoveredProject, setHoveredProject] = useState<ProjectNodeData | null>(null)
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
+
+  useEffect(() => {
+    if (!controlsRef.current) return
+    controlsRef.current.target.copy(ORBIT_CENTER)
+    controlsRef.current.update()
+  }, [])
 
   const projectNodes = useMemo<ProjectNodeData[]>(() => {
     const maxSurf = Math.max(...projects.map((project) => project.surf_km || 0), 1)
@@ -650,19 +642,14 @@ function Scene({
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 20, 10]} intensity={1} />
 
-      <CameraManager selectedProject={selectedProject} controlsRef={controlsRef} isInteracting={isInteracting} />
-
       <OrbitControls
         ref={controlsRef}
         makeDefault
-        target={[ORBIT_CENTER.x, ORBIT_CENTER.y, ORBIT_CENTER.z]}
-        autoRotate={!isInteracting && !selectedProject && !selectedReport}
+        autoRotate={false}
         autoRotateSpeed={0.5}
         enableDamping
         enablePan={false}
         maxPolarAngle={Math.PI / 2 - 0.05}
-        onStart={() => setIsInteracting(true)}
-        onEnd={() => setIsInteracting(false)}
       />
 
       <EffectComposer>
@@ -809,7 +796,6 @@ export default function Dashboard3D({
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedProject, setSelectedProject] = useState<ProjectNodeData | null>(null)
   const [selectedReport, setSelectedReport] = useState<Dashboard3DProps['reports'][number] | null>(null)
-  const [isInteracting, setIsInteracting] = useState(false)
 
   const stats = useMemo(() => {
     const term = searchTerm.toLowerCase()
@@ -841,76 +827,81 @@ export default function Dashboard3D({
   }
 
   return (
-    <div style={{ width: '100%', height: 'calc(100vh - 64px)', background: THEME.background, position: 'relative' }}>
-      {onBack && (
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            position: 'absolute',
-            top: '16px',
-            left: '16px',
-            zIndex: 50,
-            pointerEvents: 'auto',
-            background: 'rgba(10,23,20,0.85)',
-            border: `1px solid ${THEME.primary}`,
-            color: THEME.text,
-            borderRadius: '6px',
-            padding: '8px 12px',
-            fontFamily: 'monospace',
-            cursor: 'pointer',
-          }}
-        >
-          ← Dashboard
-        </button>
-      )}
+    <div
+      style={{ width: '100%', height: 'calc(100vh - 64px)', background: THEME.background, position: 'relative', overflow: 'hidden' }}
+    >
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 50 }}>
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            style={{
+              position: 'absolute',
+              top: '16px',
+              left: '16px',
+              pointerEvents: 'auto',
+              background: 'rgba(10,23,20,0.85)',
+              border: `1px solid ${THEME.primary}`,
+              color: THEME.text,
+              borderRadius: '6px',
+              padding: '8px 12px',
+              fontFamily: 'monospace',
+              cursor: 'pointer',
+            }}
+          >
+            ← Dashboard
+          </button>
+        )}
 
-      <div style={{ ...panelStyle, position: 'absolute', top: '72px', left: '24px', width: '320px', zIndex: 40 }}>
-        <h2 style={{ margin: '0 0 12px 0', fontSize: '14px', color: THEME.primary, letterSpacing: '1px' }}>
-          SYSTEM SEARCH
-        </h2>
-        <input
-          type="text"
-          placeholder="Search projects or operators..."
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-          style={{
-            width: '100%',
-            padding: '10px',
-            background: 'rgba(0,0,0,0.5)',
-            border: `1px solid ${THEME.muted}`,
-            color: THEME.text,
-            fontFamily: 'inherit',
-            outline: 'none',
-            borderRadius: '4px',
-            boxSizing: 'border-box',
-          }}
-        />
-      </div>
-
-      <div style={{ ...panelStyle, position: 'absolute', bottom: '24px', left: '24px', padding: '16px', minWidth: '200px', zIndex: 40 }}>
-        <div style={{ fontSize: '12px', color: THEME.muted, marginBottom: '12px', letterSpacing: '1px' }}>
-          CONTINENT CLUSTERS
+        <div style={{ ...panelStyle, position: 'absolute', top: '72px', left: '24px', width: '320px', pointerEvents: 'auto' }}>
+          <h2 style={{ margin: '0 0 12px 0', fontSize: '14px', color: THEME.primary, letterSpacing: '1px' }}>
+            SYSTEM SEARCH
+          </h2>
+          <input
+            type="text"
+            placeholder="Search projects or operators..."
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            style={{
+              width: '100%',
+              padding: '10px',
+              background: 'rgba(0,0,0,0.5)',
+              border: `1px solid ${THEME.muted}`,
+              color: THEME.text,
+              fontFamily: 'inherit',
+              outline: 'none',
+              borderRadius: '4px',
+              boxSizing: 'border-box',
+            }}
+          />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px' }}>
-          {Object.entries(CONTINENT_COLORS).map(([name, color]) => (
-            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-              <div
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  background: color,
-                  borderRadius: '2px',
-                  boxShadow: `0 0 8px ${color}`,
-                }}
-              />
-              <span>{name}</span>
-            </div>
-          ))}
+
+        <div style={{ ...panelStyle, position: 'absolute', bottom: '24px', left: '24px', padding: '16px', minWidth: '200px', pointerEvents: 'auto' }}>
+          <div style={{ fontSize: '12px', color: THEME.muted, marginBottom: '12px', letterSpacing: '1px' }}>
+            CONTINENT CLUSTERS
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px' }}>
+            {Object.entries(CONTINENT_COLORS).map(([name, color]) => (
+              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                <div
+                  style={{
+                    width: '12px',
+                    height: '12px',
+                    background: color,
+                    borderRadius: '2px',
+                    boxShadow: `0 0 8px ${color}`,
+                  }}
+                />
+                <span>{name}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       <Canvas
+        style={{ position: 'absolute', inset: 0 }}
+        dpr={[1, 2]}
         camera={{ position: [DEFAULT_CAMERA_POSITION.x, DEFAULT_CAMERA_POSITION.y, DEFAULT_CAMERA_POSITION.z], fov: 45 }}
         onPointerMissed={() => {
           setSelectedProject(null)
@@ -928,10 +919,7 @@ export default function Dashboard3D({
           searchTerm={searchTerm}
           selectedProject={selectedProject}
           setSelectedProject={setSelectedProject}
-          selectedReport={selectedReport}
           setSelectedReport={setSelectedReport}
-          isInteracting={isInteracting}
-          setIsInteracting={setIsInteracting}
         />
 
         <Html fullscreen zIndexRange={[100, 0]}>
@@ -946,7 +934,17 @@ export default function Dashboard3D({
               fontFamily: 'monospace',
             }}
           >
-            <div style={{ ...panelStyle, position: 'absolute', top: '24px', right: '24px', minWidth: '220px', textAlign: 'right' }}>
+            <div
+              style={{
+                ...panelStyle,
+                position: 'absolute',
+                top: '24px',
+                right: '24px',
+                minWidth: '220px',
+                textAlign: 'right',
+                pointerEvents: 'none',
+              }}
+            >
               <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', color: THEME.primary, letterSpacing: '1px' }}>
                 SCENE METRICS
               </h2>
