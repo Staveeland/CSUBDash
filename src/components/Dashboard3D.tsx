@@ -72,7 +72,6 @@ const THEME = {
   accent: '#c9a84c',
   text: '#ffffff',
   muted: '#8ca8a0',
-  font: 'https://fonts.gstatic.com/s/robotomono/v22/L0xuDF4xlVMF-BfR8bXMIhJHg45bgJpHRw.woff',
 }
 
 const CONTINENT_COLORS: Record<string, string> = {
@@ -131,7 +130,6 @@ function EmptyState() {
         position={[0, -4, 0]}
         fontSize={1}
         color={getGlowColor(THEME.primary, 1.5)}
-        font={THEME.font}
       >
         AWAITING DATA...
       </Text>
@@ -352,7 +350,6 @@ function TimelineBar({
         position={[0, -height / 2 - 1.5, 0]}
         fontSize={1}
         color={THEME.muted}
-        font={THEME.font}
         rotation={[0, Math.PI, 0]}
       >
         {forecast.year}
@@ -477,7 +474,6 @@ function ReportNode({
         position={[0, 3, 0.1]}
         fontSize={0.7}
         color={THEME.accent}
-        font={THEME.font}
         maxWidth={14}
         anchorY="top"
         textAlign="center"
@@ -488,7 +484,6 @@ function ReportNode({
         position={[0, 0, 0.1]}
         fontSize={0.4}
         color={THEME.text}
-        font={THEME.font}
         maxWidth={14}
         anchorY="middle"
         textAlign="center"
@@ -500,7 +495,6 @@ function ReportNode({
         position={[0, -2.5, 0.1]}
         fontSize={0.3}
         color={THEME.muted}
-        font={THEME.font}
         anchorY="middle"
         textAlign="center"
       >
@@ -510,7 +504,6 @@ function ReportNode({
         position={[0, -3.5, 0.1]}
         fontSize={0.35}
         color={hovered ? THEME.text : THEME.primary}
-        font={THEME.font}
         anchorY="bottom"
       >
         [ CLICK TO EXPAND FULL SUMMARY ]
