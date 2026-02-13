@@ -9,6 +9,7 @@ Built by [Workflows AS](https://workflows.no) for CSUB AS.
 - **Database:** Supabase (PostgreSQL)
 - **AI:** Claude API (news parsing, relevance scoring)
 - **Hosting:** Vercel
+- **Auth:** Supabase Auth + Microsoft 365 (Azure OAuth)
 
 ## ⚠️ DESIGN RULES
 - The dashboard design is in `public/dashboard.html` — this is the ONLY approved design
@@ -26,3 +27,9 @@ Built by [Workflows AS](https://workflows.no) for CSUB AS.
 
 ## Database
 Schema is in `supabase/migrations/001_initial_schema.sql`
+
+## Authentication
+- Login is handled via Microsoft 365 OAuth.
+- Only users with these email domains are allowed:
+  - `@csub.com`
+  - `@workflows.no`

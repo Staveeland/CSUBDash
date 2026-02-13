@@ -121,6 +121,20 @@ function buildProjectKey(project: Project): string {
   return raw.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 }
 
+function getUserDisplayName(email: string | undefined): string {
+  if (!email) return 'Innlogget bruker'
+  return email
+}
+
+function getInitials(value: string): string {
+  const source = value.includes('@') ? value.split('@')[0] : value
+  const cleaned = source.replace(/[^a-zA-Z0-9 ]/g, ' ').trim()
+  if (!cleaned) return 'U'
+  const parts = cleaned.split(/\s+/).filter(Boolean)
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
+}
+
 function buildChartsFromProjects(source: Project[]): Charts {
   const countryMap = new Map<string, number>()
   const phaseMap = new Map<string, number>()
@@ -234,7 +248,7 @@ function CompactTooltip({ active, payload, label }: { active?: boolean; payload?
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -245,6 +259,9 @@ export default function Dashboard() {
   const [lang, setLang] = useState<'no' | 'en'>('no')
   const [region, setRegion] = useState<RegionFilter>('All')
   const [view, setView] = useState<DashboardView>('historical')
+
+  const userLabel = getUserDisplayName(userEmail)
+  const userInitials = getInitials(userLabel)
 
   const fetchData = useCallback(async () => {
     try {
@@ -425,8 +442,16 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="hidden md:flex items-center gap-2 rounded-full bg-[var(--csub-dark)] border border-[var(--csub-light-soft)] px-3 py-1.5">
-              <div className="w-7 h-7 rounded-full bg-[var(--csub-gold)] text-[var(--csub-dark)] grid place-items-center text-xs font-bold">HR</div>
-              <span className="text-xs">Helge Rasmussen</span>
+              <div className="w-7 h-7 rounded-full bg-[var(--csub-gold)] text-[var(--csub-dark)] grid place-items-center text-xs font-bold">
+                {userInitials}
+              </div>
+              <span className="text-xs">{userLabel}</span>
+              <a
+                href="/auth/logout"
+                className="ml-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)] hover:text-white"
+              >
+                Logg ut
+              </a>
             </div>
           </div>
         </div>
