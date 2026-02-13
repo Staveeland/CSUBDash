@@ -869,7 +869,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     const latestContractByOperator = new Map<string, string>()
     const latestContractByCountry = new Map<string, string>()
 
-    const normalizedProjects = viewProjects.slice(0, 110)
+    const normalizedProjects = regionProjects.slice(0, 110)
 
     const contractNodes: IntelItem[] = normalizedProjects.map((project, index) => {
       const projectName = project.development_project || project.asset || `Project ${index + 1}`
@@ -907,7 +907,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         category: 'Contract',
         client: project.operator || project.surf_contractor || 'Unknown operator',
         value: valueLabel,
-        status: view === 'historical' ? 'Historical contract' : 'Pipeline contract',
+        status: year <= currentYear ? 'Historical contract' : 'Pipeline contract',
         date: `${year}`,
         summary: `${project.country || 'Unknown country'} | ${project.facility_category || 'Unknown category'} | SURF ${(project.surf_km || 0).toLocaleString('en-US')} km | XMT ${(project.xmt_count || 0).toLocaleString('en-US')}`,
         position: [x, Number(y.toFixed(2)), z],
@@ -1073,7 +1073,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       ...node,
       connections: Array.from(new Set(node.connections.filter((id) => id !== node.id && knownIds.has(id)))).slice(0, 8),
     }))
-  }, [currentYear, forecasts, reports, view, viewProjects])
+  }, [currentYear, forecasts, regionProjects, reports])
 
   const openDrawer = (project: Project) => {
     setSelectedProject(project)
