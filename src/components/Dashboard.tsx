@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNo
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
-import IntelSpace3D from './IntelSpace3D'
+import IntelSpace3D, { type IntelItem } from './IntelSpace3D'
 import {
   Area,
   AreaChart,
@@ -864,6 +864,217 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     }))
   }, [filteredProjects])
 
+  const intel3DData = useMemo<IntelItem[]>(() => {
+    const contractsByYear = new Map<number, string[]>()
+    const latestContractByOperator = new Map<string, string>()
+    const latestContractByCountry = new Map<string, string>()
+
+    const normalizedProjects = viewProjects.slice(0, 110)
+
+    const contractNodes: IntelItem[] = normalizedProjects.map((project, index) => {
+      const projectName = project.development_project || project.asset || `Project ${index + 1}`
+      const year = getProjectYear(project) ?? currentYear
+      const theta = (index / Math.max(1, normalizedProjects.length)) * Math.PI * 3.6
+      const radius = 20 + (index % 8) * 1.65
+      const y = ((index % 10) - 4.5) * 1.55
+
+      const x = Number((Math.cos(theta) * radius).toFixed(2))
+      const z = Number((Math.sin(theta) * radius).toFixed(2))
+      const id = `contract-${buildProjectKey(project)}-${index}`
+
+      const estimatedUsd = Math.max(0, project.surf_km || 0) * 1_000_000 + Math.max(0, project.xmt_count || 0) * 120_000
+      const valueLabel = estimatedUsd > 0
+        ? `$${(estimatedUsd / 1_000_000).toFixed(1)}M`
+        : `${Math.max(0, project.xmt_count || 0).toLocaleString('en-US')} XMT`
+
+      const connections = ['hub']
+      const operatorKey = normalize(project.operator)
+      const countryKey = normalize(project.country)
+      const previousOperatorNode = operatorKey ? latestContractByOperator.get(operatorKey) : undefined
+      const previousCountryNode = countryKey ? latestContractByCountry.get(countryKey) : undefined
+
+      if (previousOperatorNode) connections.push(previousOperatorNode)
+      if (previousCountryNode && previousCountryNode !== previousOperatorNode) connections.push(previousCountryNode)
+
+      if (operatorKey) latestContractByOperator.set(operatorKey, id)
+      if (countryKey) latestContractByCountry.set(countryKey, id)
+      if (!contractsByYear.has(year)) contractsByYear.set(year, [])
+      contractsByYear.get(year)!.push(id)
+
+      return {
+        id,
+        title: projectName,
+        category: 'Contract',
+        client: project.operator || project.surf_contractor || 'Unknown operator',
+        value: valueLabel,
+        status: view === 'historical' ? 'Historical contract' : 'Pipeline contract',
+        date: `${year}`,
+        summary: `${project.country || 'Unknown country'} | ${project.facility_category || 'Unknown category'} | SURF ${(project.surf_km || 0).toLocaleString('en-US')} km | XMT ${(project.xmt_count || 0).toLocaleString('en-US')}`,
+        position: [x, Number(y.toFixed(2)), z],
+        connections,
+        tags: [
+          project.development_project,
+          project.asset,
+          project.operator,
+          project.surf_contractor,
+          project.country,
+          project.continent,
+          project.facility_category,
+          project.water_depth_category,
+        ].filter((value): value is string => Boolean(value)),
+        signal: estimatedUsd / 1_000_000,
+      }
+    })
+
+    const selectLinkedContract = (year: number): string | null => {
+      for (let offset = 0; offset <= 3; offset++) {
+        const sameYear = contractsByYear.get(year + offset)?.[0]
+        if (sameYear) return sameYear
+        const previousYear = contractsByYear.get(year - offset)?.[0]
+        if (previousYear) return previousYear
+      }
+      return contractNodes[0]?.id ?? null
+    }
+
+    const forecastSource = [...forecasts]
+      .filter((item) => Number.isFinite(item.year) && Number.isFinite(item.value))
+      .sort((a, b) => a.year - b.year || normalizeMetricName(a.metric).localeCompare(normalizeMetricName(b.metric)))
+      .slice(-36)
+
+    const predictionsByYear = new Map<number, string[]>()
+
+    const predictionNodes: IntelItem[] = forecastSource.map((forecast, index) => {
+      const metricLabel = forecast.metric
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+
+      const metricSlug = normalizeMetricName(forecast.metric || `metric-${index}`)
+      const id = `prediction-${forecast.year}-${metricSlug}-${index}`
+      const theta = (index / Math.max(1, forecastSource.length)) * Math.PI * 2.6
+      const radius = 11 + (index % 7) * 1.75
+      const y = 12 + (index % 6) * 1.9
+      const x = Number((Math.cos(theta) * radius).toFixed(2))
+      const z = Number((Math.sin(theta) * radius).toFixed(2))
+
+      const lowerUnit = forecast.unit.toLowerCase()
+      const valueLabel = lowerUnit.includes('%')
+        ? `${forecast.value.toFixed(1)}%`
+        : lowerUnit.includes('usd') || metricSlug.includes('usd')
+          ? `$${forecast.value.toLocaleString('en-US')}${lowerUnit.includes('bn') ? 'B' : ''}`
+          : `${forecast.value.toLocaleString('en-US')} ${forecast.unit}`.trim()
+
+      const linkedContract = selectLinkedContract(forecast.year)
+      const connections = ['hub']
+      if (linkedContract) connections.push(linkedContract)
+
+      if (!predictionsByYear.has(forecast.year)) predictionsByYear.set(forecast.year, [])
+      predictionsByYear.get(forecast.year)!.push(id)
+
+      return {
+        id,
+        title: `${forecast.year} ${metricLabel || 'Forecast Metric'}`,
+        category: 'Prediction',
+        client: 'Forecast model',
+        value: valueLabel,
+        status: 'Modelled',
+        date: `${forecast.year}`,
+        summary: `Metric: ${metricLabel || forecast.metric}. Unit: ${forecast.unit || 'n/a'}. Value sourced from parsed AI forecast dataset.`,
+        position: [x, Number(y.toFixed(2)), z],
+        connections,
+        tags: [forecast.metric, forecast.unit, String(forecast.year)].filter(Boolean),
+        signal: forecast.value,
+      }
+    })
+
+    const pickPredictionForYear = (year: number): string | null => {
+      for (let offset = 0; offset <= 4; offset++) {
+        const sameYear = predictionsByYear.get(year + offset)?.[0]
+        if (sameYear) return sameYear
+        const previousYear = predictionsByYear.get(year - offset)?.[0]
+        if (previousYear) return previousYear
+      }
+      return predictionNodes[0]?.id ?? null
+    }
+
+    const reportSource = [...reports]
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, 24)
+
+    const timelineNodes: IntelItem[] = reportSource.map((report, index) => {
+      const createdYear = new Date(report.created_at).getFullYear()
+      const reportYear =
+        parseYearFromText(report.report_period) ??
+        parseYearFromText(report.file_name) ??
+        (Number.isFinite(createdYear) ? createdYear : null) ??
+        currentYear
+
+      const spread = reportSource.length > 1 ? index / (reportSource.length - 1) : 0.5
+      const arc = spread * Math.PI * 1.8 - Math.PI * 0.9
+      const radius = 24 + (index % 4) * 1.8
+      const x = Number((Math.sin(arc) * radius).toFixed(2))
+      const y = Number((-13 - (index % 5) * 1.45).toFixed(2))
+      const z = Number((Math.cos(arc) * 18).toFixed(2))
+
+      const summarySource = (report.ai_summary || '').replace(/\s+/g, ' ').trim()
+      const summaryPreview = summarySource
+        ? `${summarySource.slice(0, 220)}${summarySource.length > 220 ? '...' : ''}`
+        : 'No AI summary available for this report yet.'
+
+      const connectedPrediction = pickPredictionForYear(reportYear)
+      const connectedContract = selectLinkedContract(reportYear)
+
+      const connections = ['hub']
+      if (connectedPrediction) connections.push(connectedPrediction)
+      if (connectedContract) connections.push(connectedContract)
+
+      return {
+        id: `timeline-${report.id}-${index}`,
+        title: report.report_period || report.file_name,
+        category: 'Timeline',
+        client: 'Intel report',
+        value: report.download_url ? 'PDF + AI' : 'AI summary',
+        status: report.ai_summary ? 'Parsed' : 'Raw upload',
+        date: `${reportYear}`,
+        summary: summaryPreview,
+        position: [x, y, z],
+        connections,
+        tags: [report.file_name, report.report_period || '', summarySource.slice(0, 80)].filter(Boolean),
+        signal: summarySource.length,
+      }
+    })
+
+    const hubConnections = [
+      ...contractNodes.slice(0, 8).map((item) => item.id),
+      ...predictionNodes.slice(0, 6).map((item) => item.id),
+      ...timelineNodes.slice(0, 6).map((item) => item.id),
+    ]
+
+    const hubNode: IntelItem = {
+      id: 'hub',
+      title: 'CSUB CORE',
+      category: 'Company',
+      client: 'Unified intelligence',
+      value: `${contractNodes.length + predictionNodes.length + timelineNodes.length} signals`,
+      status: 'Synchronized',
+      date: `${currentYear}`,
+      summary: 'Central index for contracts, predictions and timeline intelligence extracted from dashboard datasets.',
+      position: [0, 0, 0],
+      connections: hubConnections,
+      tags: ['core', 'contracts', 'predictions', 'timeline'],
+      signal: contractNodes.length + predictionNodes.length + timelineNodes.length,
+    }
+
+    const nodes = [...contractNodes, ...predictionNodes, ...timelineNodes, hubNode]
+    const knownIds = new Set(nodes.map((item) => item.id))
+
+    return nodes.map((node) => ({
+      ...node,
+      connections: Array.from(new Set(node.connections.filter((id) => id !== node.id && knownIds.has(id)))).slice(0, 8),
+    }))
+  }, [currentYear, forecasts, reports, view, viewProjects])
+
   const openDrawer = (project: Project) => {
     setSelectedProject(project)
     setDrawerOpen(true)
@@ -1553,7 +1764,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </>
         )}
       </div>
-      {show3DView && <IntelSpace3D onClose={() => setShow3DView(false)} />}
+      {show3DView && <IntelSpace3D onClose={() => setShow3DView(false)} initialData={intel3DData} />}
     </div>
   )
 }
