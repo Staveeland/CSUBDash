@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
+import Image from 'next/image'
 import {
   Area,
   AreaChart,
@@ -398,7 +399,14 @@ export default function Dashboard() {
       <header className="sticky top-0 z-50 border-b border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.95)] backdrop-blur">
         <div className="max-w-[1600px] mx-auto h-16 px-4 md:px-8 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <span className="text-2xl md:text-[28px] font-serif font-semibold tracking-widest text-[var(--csub-gold)]">CSUB</span>
+            <Image
+              src="/csub-logo.svg"
+              alt="CSUB logo"
+              width={132}
+              height={34}
+              priority
+              className="h-7 md:h-8 w-auto"
+            />
             <span className="hidden sm:block text-xs text-[var(--csub-light)] uppercase tracking-[0.2em]">Sales Intelligence Platform</span>
           </div>
           <div className="flex items-center gap-3">
