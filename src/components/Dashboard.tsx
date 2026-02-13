@@ -92,6 +92,7 @@ interface ActivityItem {
 }
 
 const DONUT_COLORS = ['#4db89e', '#38917f', '#2d7368', '#c9a84c', '#7dd4bf', '#245a4e']
+const REGION_COLORS = ['#4db89e', '#c9a84c', '#e06c75', '#61afef', '#c678dd', '#d19a66']
 const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3c34']
 const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
 
@@ -242,6 +243,67 @@ function formatMillions(value: number): string {
   return `$${(value / 1_000_000).toFixed(1)}M`
 }
 
+interface ParsedReport {
+  title: string | null
+  highlights: string[]
+  keyFigures: { label: string; value: string }[]
+}
+
+function parseReportSummary(summary: string | null): ParsedReport {
+  const empty: ParsedReport = { title: null, highlights: [], keyFigures: [] }
+  if (!summary) return empty
+
+  try {
+    // Extract title from first ## heading
+    const headingMatch = summary.match(/^##\s+(.+)$/m)
+    const title = headingMatch ? headingMatch[1].trim() : null
+
+    // Extract bullet points (lines starting with - or *)
+    const bullets = summary.match(/^[\-\*]\s+(.+)$/gm)
+    const highlights = (bullets || [])
+      .map((b) => b.replace(/^[\-\*]\s+/, '').trim())
+      .filter((b) => b.length > 10)
+      .slice(0, 4)
+
+    // If no bullets, extract first sentences from paragraphs
+    const finalHighlights = highlights.length > 0
+      ? highlights
+      : summary
+          .split(/\n\n+/)
+          .map((p) => p.replace(/^#+\s+.*$/m, '').trim())
+          .filter((p) => p.length > 20 && !p.startsWith('{') && !p.startsWith('```'))
+          .map((p) => {
+            const firstSentence = p.match(/^[^.!?]+[.!?]/)
+            return firstSentence ? firstSentence[0].trim() : p.slice(0, 120) + '…'
+          })
+          .slice(0, 4)
+
+    // Extract Key Figures JSON block
+    const keyFigures: { label: string; value: string }[] = []
+    const jsonMatch = summary.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || summary.match(/\{[\s\S]*"[^"]+"\s*:\s*[\s\S]*\}/)
+    if (jsonMatch) {
+      try {
+        const jsonStr = jsonMatch[1] || jsonMatch[0]
+        const parsed = JSON.parse(jsonStr)
+        if (typeof parsed === 'object' && parsed !== null) {
+          for (const [key, val] of Object.entries(parsed)) {
+            if (keyFigures.length >= 6) break
+            const label = key.replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+            keyFigures.push({ label, value: String(val) })
+          }
+        }
+      } catch {
+        // JSON parse failed, skip
+      }
+    }
+
+    return { title, highlights: finalHighlights, keyFigures }
+  } catch {
+    // Fallback: truncated text
+    return { title: null, highlights: [summary.slice(0, 200) + (summary.length > 200 ? '…' : '')], keyFigures: [] }
+  }
+}
+
 function LoadingPlaceholder({ text = 'Laster...' }: { text?: string }) {
   return <div className="text-center py-6 text-sm text-[var(--text-muted)] animate-pulse">{text}</div>
 }
@@ -380,11 +442,11 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     }
     return {
       year: maxYear,
-      spend: get(['subsea_spend_usd_bn', 'subsea_spending_usd_bn', 'subsea_market_spend_total_usd_bn']),
-      xmt: get(['xmt_installations']),
-      surf: get(['surf_installations_km']),
-      growth: get(['subsea_capex_growth_yoy_pct']),
-      brent: get(['brent_avg_usd_per_bbl']),
+      spend: get(['subsea_spend_usd_bn', 'subsea_spending_usd_bn', 'subsea_market_spend_total_usd_bn', 'subsea_spend_total_usd_bn']),
+      xmt: get(['xmt_installations', 'xmt_installations_count', 'xmt_installs']),
+      surf: get(['surf_installations_km', 'surf_km', 'surf_installations']),
+      growth: get(['subsea_capex_growth_yoy_pct', 'capex_growth_yoy_pct', 'subsea_growth_pct']),
+      brent: get(['brent_avg_usd_per_bbl', 'brent_usd_per_bbl', 'brent_price_usd']),
     }
   }, [forecasts])
 
@@ -977,7 +1039,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                     <Tooltip content={<RegionalTooltip />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
                     <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'var(--font-mono)' }} />
                     {REGION_KEYS.map((r, i) => (
-                      <Bar key={r.key} dataKey={r.label} stackId="regions" fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                      <Bar key={r.key} dataKey={r.label} stackId="regions" fill={REGION_COLORS[i % REGION_COLORS.length]} />
                     ))}
                   </BarChart>
                 </ResponsiveContainer>
@@ -994,28 +1056,60 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               <LoadingPlaceholder text="Ingen rapporter tilgjengelig" />
             ) : (
               <div className="flex flex-col gap-3 max-h-[500px] overflow-y-auto">
-                {reports.slice(0, 6).map((report) => (
-                  <div key={report.id} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setExpandedReport(expandedReport === report.id ? null : report.id)}
-                      className="w-full text-left px-4 py-3 flex justify-between items-start gap-2 hover:bg-[color:rgba(77,184,158,0.08)] transition-colors cursor-pointer"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm text-white truncate">{report.file_name}</p>
-                        <p className="text-xs text-[var(--text-muted)] font-mono mt-1">
-                          {new Date(report.created_at).toLocaleDateString('nb-NO')}
-                        </p>
+                {reports.slice(0, 6).map((report) => {
+                  const parsed = parseReportSummary(report.ai_summary)
+                  return (
+                    <div key={report.id} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] overflow-hidden">
+                      <div className="px-4 py-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white">{parsed.title || report.file_name}</p>
+                            <p className="text-xs text-[var(--text-muted)] font-mono mt-1">
+                              {new Date(report.created_at).toLocaleDateString('nb-NO')}
+                            </p>
+                          </div>
+                        </div>
+
+                        {parsed.highlights.length > 0 && (
+                          <ul className="mt-3 space-y-1.5">
+                            {parsed.highlights.map((h, i) => (
+                              <li key={i} className="flex items-start gap-2 text-xs text-[var(--text-muted)] leading-relaxed">
+                                <span className="mt-0.5 shrink-0 text-[var(--csub-gold)]">•</span>
+                                <span>{h}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {parsed.keyFigures.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {parsed.keyFigures.map((kf, i) => (
+                              <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[color:rgba(77,184,158,0.12)] border border-[var(--csub-light-soft)] px-2.5 py-1 text-[11px]">
+                                <span className="text-[var(--text-muted)]">{kf.label}:</span>
+                                <span className="font-mono font-semibold text-white">{kf.value}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {report.ai_summary && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedReport(expandedReport === report.id ? null : report.id)}
+                            className="mt-3 text-xs text-[var(--csub-light)] hover:text-white transition-colors cursor-pointer"
+                          >
+                            {expandedReport === report.id ? '▲ Skjul' : '▼ Les mer'}
+                          </button>
+                        )}
                       </div>
-                      <span className="text-[var(--text-muted)] shrink-0">{expandedReport === report.id ? '▲' : '▼'}</span>
-                    </button>
-                    {expandedReport === report.id && report.ai_summary && (
-                      <div className="px-4 pb-4 text-sm text-[var(--text-muted)] leading-relaxed border-t border-[var(--csub-light-faint)]">
-                        <p className="mt-3">{report.ai_summary}</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                      {expandedReport === report.id && report.ai_summary && (
+                        <div className="px-4 pb-4 text-sm text-[var(--text-muted)] leading-relaxed border-t border-[var(--csub-light-faint)]">
+                          <p className="mt-3 whitespace-pre-line">{report.ai_summary}</p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </Panel>
