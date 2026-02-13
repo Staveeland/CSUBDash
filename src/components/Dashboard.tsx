@@ -236,6 +236,7 @@ function CompactTooltip({ active, payload, label }: { active?: boolean; payload?
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -246,10 +247,20 @@ export default function Dashboard() {
 
   const fetchData = useCallback(async () => {
     try {
-      const p = await fetch('/api/dashboard/projects').then((response) => (response.ok ? response.json() : null))
-      if (Array.isArray(p)) setProjects(p)
+      const response = await fetch('/api/dashboard/projects')
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload?.error || `Dashboard API failed with status ${response.status}`)
+      }
+      if (!Array.isArray(payload)) {
+        throw new Error('Dashboard API returned invalid format')
+      }
+      setProjects(payload)
+      setLoadError(null)
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
+      setLoadError(error instanceof Error ? error.message : 'Unknown dashboard loading error')
+      setProjects([])
     } finally {
       setLoading(false)
     }
@@ -414,6 +425,12 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-[1600px] mx-auto p-4 md:p-8 space-y-8">
+        {loadError && (
+          <section className="rounded-xl border border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.1)] px-4 py-3 text-sm text-[var(--csub-gold)] font-mono">
+            Datafeil: {loadError}
+          </section>
+        )}
+
         <section className="space-y-4">
           <div className="relative">
             <input
