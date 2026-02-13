@@ -31,7 +31,11 @@ const MapSection = dynamic(() => import('./MapSection'), {
 
 const Dashboard3D = dynamic(() => import('./Dashboard3D'), {
   ssr: false,
-  loading: () => <Loading3DState />,
+  loading: () => (
+    <div className="w-full h-[calc(100vh-64px)] bg-[var(--bg-dark)] border border-[var(--csub-light-soft)] rounded-xl grid place-items-center">
+      <span className="font-mono text-sm text-[var(--csub-light)]">Laster 3D-visning...</span>
+    </div>
+  ),
 })
 
 interface Stats {
@@ -535,28 +539,6 @@ function parseReportSummary(summary: string | null): ParsedReport {
 
 function LoadingPlaceholder({ text = 'Laster...' }: { text?: string }) {
   return <div className="text-center py-6 text-sm text-[var(--text-muted)] animate-pulse">{text}</div>
-}
-
-function Loading3DState() {
-  const [slowLoad, setSlowLoad] = useState(false)
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setSlowLoad(true), 12000)
-    return () => window.clearTimeout(timeout)
-  }, [])
-
-  return (
-    <div className="w-full h-[calc(100vh-64px)] bg-[var(--bg-dark)] border border-[var(--csub-light-soft)] rounded-xl grid place-items-center px-6 text-center">
-      <div>
-        <p className="font-mono text-sm text-[var(--csub-light)]">Laster 3D-visning...</p>
-        {slowLoad && (
-          <p className="mt-2 text-xs text-[var(--csub-gold)]">
-            3D-last tar for lang tid. Dette indikerer feil i runtime/lasteressurser.
-          </p>
-        )}
-      </div>
-    </div>
-  )
 }
 
 function PipelineTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value?: number }>; label?: string | number }) {
