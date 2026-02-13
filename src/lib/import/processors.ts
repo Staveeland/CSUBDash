@@ -9,11 +9,41 @@ const CHUNK_SIZE = 500
 let _systemUserId: string | null = null
 async function getSystemUserId(supabase: ReturnType<typeof createAdminClient>): Promise<string> {
   if (_systemUserId) return _systemUserId
+
+  const existingUsers = await supabase
+    .from('users')
+    .select('id')
+    .order('created_at', { ascending: true })
+    .limit(1)
+
+  const existingId = existingUsers.data?.[0]?.id
+  if (!existingUsers.error && existingId) {
+    _systemUserId = existingId
+    return existingId
+  }
+
   const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1 })
-  const userId = data?.users?.[0]?.id
-  if (!userId) throw new Error('No users found in auth.users — cannot set uploaded_by')
-  _systemUserId = userId
-  return userId
+  const firstUser = data?.users?.[0]
+  if (!firstUser?.id) throw new Error('No users found in auth.users — cannot set uploaded_by')
+
+  const upsertUser = await supabase
+    .from('users')
+    .upsert(
+      {
+        id: firstUser.id,
+        email: firstUser.email ?? 'system@csub.com',
+        full_name: (firstUser.user_metadata?.full_name as string | undefined) ?? null,
+        role: 'admin',
+      },
+      { onConflict: 'id' }
+    )
+
+  if (upsertUser.error) {
+    throw new Error(`Failed to create fallback user for document uploads: ${upsertUser.error.message}`)
+  }
+
+  _systemUserId = firstUser.id
+  return firstUser.id
 }
 
 const SUPPORTED_JOB_TYPES = ['excel_rystad', 'pdf_contract_awards', 'pdf_market_report'] as const
@@ -45,13 +75,6 @@ interface ContractRow {
   region: string
   segment: string
   duration: string
-}
-
-interface ForecastEntry {
-  year: number
-  metric: string
-  value: number
-  unit: string
 }
 
 function getOpenAI() {
@@ -176,6 +199,216 @@ function hashStr(s: string): string {
     hash |= 0
   }
   return Math.abs(hash).toString(36)
+}
+
+function normalizeMetricKey(metric: string): string {
+  return metric
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function normalizeForecastMetric(metric: string): string {
+  const normalized = normalizeMetricKey(metric)
+  if (!normalized) return normalized
+
+  const regionalMetricCandidates: Array<{ pattern: RegExp; metric: string }> = [
+    { pattern: /(^|_)europe(_|$)/, metric: 'europe_subsea_spend_total_usd_bn' },
+    { pattern: /(^|_)south_america(_|$)/, metric: 'south_america_subsea_spend_total_usd_bn' },
+    { pattern: /(^|_)north_america(_|$)/, metric: 'north_america_subsea_spend_total_usd_bn' },
+    { pattern: /(^|_)africa(_|$)/, metric: 'africa_subsea_spend_total_usd_bn' },
+    { pattern: /(^|_)asia(_|$)|(^|_)australia(_|$)/, metric: 'asia_australia_subsea_spend_total_usd_bn' },
+    { pattern: /(^|_)middle_east(_|$)|(^|_)russia(_|$)/, metric: 'middle_east_russia_subsea_spend_total_usd_bn' },
+  ]
+
+  const isRegionalSpend =
+    normalized.includes('subsea') &&
+    (normalized.includes('spend') || normalized.includes('capex')) &&
+    regionalMetricCandidates.some((candidate) => candidate.pattern.test(normalized))
+
+  if (isRegionalSpend) {
+    const regionalMetric = regionalMetricCandidates.find((candidate) => candidate.pattern.test(normalized))
+    if (regionalMetric) return regionalMetric.metric
+  }
+
+  if (
+    normalized.includes('subsea') &&
+    (normalized.includes('spend') || normalized.includes('spending') || normalized.includes('capex')) &&
+    (normalized.includes('usd') || normalized.includes('bn') || normalized.includes('billion'))
+  ) {
+    return 'subsea_spend_usd_bn'
+  }
+
+  if (
+    normalized.includes('xmt') &&
+    (normalized.includes('install') || normalized.includes('unit') || normalized.includes('count') || normalized.includes('tree'))
+  ) {
+    return 'xmt_installations'
+  }
+
+  if (
+    normalized.includes('surf') &&
+    (normalized.includes('km') || normalized.includes('install') || normalized.includes('line'))
+  ) {
+    return 'surf_km'
+  }
+
+  if (
+    (normalized.includes('growth') || normalized.includes('yoy')) &&
+    (normalized.includes('subsea') || normalized.includes('capex') || normalized.includes('spend'))
+  ) {
+    return 'subsea_capex_growth_yoy_pct'
+  }
+
+  if (normalized.includes('brent')) {
+    return 'brent_avg_usd_per_bbl'
+  }
+
+  if (normalized.includes('pipeline') && normalized.includes('km')) {
+    return 'pipeline_km'
+  }
+
+  return normalized
+}
+
+function normalizeForecastUnit(unit: unknown): string {
+  if (typeof unit !== 'string') return ''
+  const cleaned = unit.trim()
+  if (!cleaned) return ''
+
+  const normalized = cleaned.toLowerCase()
+
+  if (normalized.includes('usd') && (normalized.includes('bn') || normalized.includes('billion'))) return 'USD bn'
+  if (normalized === '%' || normalized.includes('percent') || normalized.includes('pct')) return '%'
+  if (normalized.includes('km')) return 'km'
+  if (normalized.includes('unit')) return 'units'
+  if (normalized.includes('bbl') || normalized.includes('barrel')) return 'USD/bbl'
+
+  return cleaned
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, '').trim()
+    if (!cleaned) return null
+    const parsed = Number(cleaned)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function toYear(value: unknown): number | null {
+  const parsed = toNumber(value)
+  if (parsed === null) return null
+  const year = Math.round(parsed)
+  return year >= 1900 && year <= 2200 ? year : null
+}
+
+function extractFirstJsonObject(content: string): string | null {
+  const start = content.indexOf('{')
+  if (start < 0) return null
+
+  let depth = 0
+  let inString = false
+  let escaping = false
+
+  for (let i = start; i < content.length; i++) {
+    const char = content[i]
+
+    if (inString) {
+      if (escaping) {
+        escaping = false
+      } else if (char === '\\') {
+        escaping = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+
+    if (char === '{') depth++
+    if (char === '}') {
+      depth--
+      if (depth === 0) return content.slice(start, i + 1)
+    }
+  }
+
+  return null
+}
+
+function parseResponseJsonObject(content: string): Record<string, unknown> {
+  const strippedCodeFence = content
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+
+  const candidate = strippedCodeFence.startsWith('{')
+    ? strippedCodeFence
+    : extractFirstJsonObject(strippedCodeFence)
+
+  if (!candidate) return {}
+
+  try {
+    const parsed = JSON.parse(candidate)
+    return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+function extractSummaryHighlights(summary: string): string[] {
+  const bullets = summary.match(/^\s*(?:[-*•]|\d+\.)\s+(.+)$/gm) || []
+  const cleanedBullets = bullets
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+\.)\s+/, '').trim())
+    .filter((line) => line.length > 16)
+    .slice(0, 6)
+
+  if (cleanedBullets.length > 0) return cleanedBullets
+
+  return summary
+    .split(/\n\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 32)
+    .map((paragraph) => {
+      const sentence = paragraph.match(/^[^.!?]+[.!?]/)
+      return sentence ? sentence[0].trim() : `${paragraph.slice(0, 160).trim()}…`
+    })
+    .slice(0, 5)
+}
+
+function buildMarketSummaryMarkdown(input: {
+  reportHeading: string
+  reportTitle: string | null
+  summary: string
+  highlights: string[]
+  keyFigures: Record<string, unknown>
+}): string {
+  const normalizedKeyFigures = Object.fromEntries(
+    Object.entries(input.keyFigures).map(([key, value]) => [key, value ?? null])
+  )
+
+  const sections = [
+    `## ${input.reportHeading}`,
+    input.reportTitle && input.reportTitle !== input.reportHeading
+      ? `### Report\n${input.reportTitle}`
+      : '',
+    input.highlights.length > 0
+      ? `### Highlights\n${input.highlights.map((line) => `- ${line}`).join('\n')}`
+      : '',
+    input.summary.trim().length > 0
+      ? `### Executive Summary\n${input.summary.trim()}`
+      : '',
+    `### Key Figures\n\`\`\`json\n${JSON.stringify(normalizedKeyFigures, null, 2)}\n\`\`\``,
+  ]
+
+  return sections.filter(Boolean).join('\n\n')
 }
 
 async function loadJob(supabase: ReturnType<typeof createAdminClient>, jobId: string): Promise<ImportJob> {
@@ -570,33 +803,33 @@ async function processMarketReportJob(supabase: ReturnType<typeof createAdminCli
             } as unknown as OpenAI.Chat.Completions.ChatCompletionContentPartText,
             {
               type: 'text',
-              text: `This is a Subsea Market Report. Analyze the entire document and return a JSON object with:
+              text: `Analyze this Subsea Market Report and return ONE valid JSON object with this schema:
+{
+  "report_period": "Q1 2026" | null,
+  "report_title": "string" | null,
+  "summary": "executive summary text",
+  "highlights": ["bullet", "bullet"],
+  "key_figures": {
+    "total_subsea_capex_usd_bn": number | null,
+    "xmt_forecast_units": number | null,
+    "surf_km_forecast": number | null,
+    "yoy_growth_pct": number | null,
+    "brent_avg_usd_per_bbl": number | null
+  },
+  "forecasts": [
+    { "year": 2026, "metric": "subsea_spend_usd_bn", "value": 54.3, "unit": "USD bn" },
+    { "year": 2026, "metric": "xmt_installations", "value": 1120, "unit": "units" }
+  ]
+}
 
-1. "summary": A comprehensive executive summary (500-800 words) covering:
-   - Market outlook and trends
-   - Key regions and activity drivers
-   - Major operators and contractors mentioned
-   - Risks and challenges
-   - Notable contract awards or project updates
-
-2. "key_figures": An object with notable numbers extracted:
-   - "total_subsea_capex_usd_bn": number or null
-   - "xmt_forecast_units": number or null (annual XMT installations forecast)
-   - "surf_km_forecast": number or null
-   - "yoy_growth_pct": number or null (year-over-year growth)
-   - Other notable metrics as key-value pairs
-
-3. "forecasts": An array of forecast data points, each with:
-   - "year": number (the forecast year)
-   - "metric": string (e.g. "subsea_capex_usd_bn", "xmt_installations", "surf_km", "subsea_unit_count", "pipeline_km")
-   - "value": number
-   - "unit": string (e.g. "USD bn", "units", "km", "%")
-
-Extract as many forecast data points as possible from tables, charts and text. Include historical data points if shown.
-
-4. "report_period": string (e.g. "Q1 2024", "Q3 2024")
-
-Return ONLY valid JSON, no other text.`,
+Rules:
+- Extract as many yearly forecast datapoints as possible from charts/tables/text.
+- Prefer these canonical metric names when possible:
+  subsea_spend_usd_bn, xmt_installations, surf_km, subsea_capex_growth_yoy_pct, brent_avg_usd_per_bbl, pipeline_km
+- Regional spend should use:
+  europe_subsea_spend_total_usd_bn, south_america_subsea_spend_total_usd_bn, north_america_subsea_spend_total_usd_bn,
+  africa_subsea_spend_total_usd_bn, asia_australia_subsea_spend_total_usd_bn, middle_east_russia_subsea_spend_total_usd_bn
+- No markdown. No prose outside JSON.`,
             },
           ],
         },
@@ -606,41 +839,143 @@ Return ONLY valid JSON, no other text.`,
     })
 
     const content = response.choices[0]?.message?.content || '{}'
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
+    const parsed = parseResponseJsonObject(content)
 
-    const summary = parsed.summary || 'No summary generated'
-    const keyFigures = parsed.key_figures || {}
-    const forecasts: ForecastEntry[] = parsed.forecasts || []
-    const reportPeriod = parsed.report_period || job.file_name
+    const summary = typeof parsed.summary === 'string' && parsed.summary.trim()
+      ? parsed.summary.trim()
+      : 'No summary generated'
 
-    const { data: existingDoc } = await supabase
+    const reportPeriod = typeof parsed.report_period === 'string' && parsed.report_period.trim()
+      ? parsed.report_period.trim()
+      : null
+
+    const reportTitle = typeof parsed.report_title === 'string' && parsed.report_title.trim()
+      ? parsed.report_title.trim()
+      : null
+
+    const keyFigures = (
+      parsed.key_figures && typeof parsed.key_figures === 'object' && !Array.isArray(parsed.key_figures)
+        ? parsed.key_figures
+        : {}
+    ) as Record<string, unknown>
+
+    const modelHighlights = Array.isArray(parsed.highlights)
+      ? parsed.highlights
+        .map((line) => (typeof line === 'string' ? line.trim() : ''))
+        .filter((line) => line.length > 10)
+        .slice(0, 6)
+      : []
+
+    const highlights = modelHighlights.length > 0 ? modelHighlights : extractSummaryHighlights(summary)
+    const reportHeading = reportPeriod || reportTitle || job.file_name
+    const aiSummary = buildMarketSummaryMarkdown({
+      reportHeading,
+      reportTitle,
+      summary,
+      highlights,
+      keyFigures,
+    })
+
+    const rawForecasts = Array.isArray(parsed.forecasts) ? parsed.forecasts : []
+    const normalizedForecasts = rawForecasts
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null
+
+        const row = entry as Record<string, unknown>
+        const year = toYear(row.year)
+        const value = toNumber(row.value)
+        const metric = typeof row.metric === 'string' ? normalizeForecastMetric(row.metric) : ''
+        const unit = normalizeForecastUnit(row.unit)
+
+        if (year === null || value === null || !metric) return null
+
+        return {
+          year,
+          metric,
+          value,
+          unit,
+          source: 'rystad_report' as const,
+        }
+      })
+      .filter((row): row is { year: number; metric: string; value: number; unit: string; source: 'rystad_report' } => Boolean(row))
+
+    const fallbackYearFromText = (() => {
+      const match = (reportPeriod || reportTitle || job.file_name).match(/\b(19|20)\d{2}\b/)
+      return match ? Number(match[0]) : null
+    })()
+
+    if (!normalizedForecasts.length && fallbackYearFromText !== null) {
+      const keyFigureMap = new Map<string, number>()
+      for (const [key, value] of Object.entries(keyFigures)) {
+        const parsedNumber = toNumber(value)
+        if (parsedNumber === null) continue
+        keyFigureMap.set(normalizeMetricKey(key), parsedNumber)
+      }
+
+      const fallbackMetrics = [
+        { keyOptions: ['total_subsea_capex_usd_bn', 'subsea_spend_usd_bn', 'subsea_capex_usd_bn'], metric: 'subsea_spend_usd_bn', unit: 'USD bn' },
+        { keyOptions: ['xmt_forecast_units', 'xmt_installations'], metric: 'xmt_installations', unit: 'units' },
+        { keyOptions: ['surf_km_forecast', 'surf_km'], metric: 'surf_km', unit: 'km' },
+        { keyOptions: ['yoy_growth_pct', 'subsea_capex_growth_yoy_pct'], metric: 'subsea_capex_growth_yoy_pct', unit: '%' },
+        { keyOptions: ['brent_avg_usd_per_bbl', 'brent_price_usd'], metric: 'brent_avg_usd_per_bbl', unit: 'USD/bbl' },
+      ]
+
+      for (const fallback of fallbackMetrics) {
+        const value = fallback.keyOptions
+          .map((key) => keyFigureMap.get(normalizeMetricKey(key)) ?? null)
+          .find((candidate) => candidate !== null)
+
+        if (typeof value === 'number') {
+          normalizedForecasts.push({
+            year: fallbackYearFromText,
+            metric: fallback.metric,
+            value,
+            unit: fallback.unit,
+            source: 'rystad_report' as const,
+          })
+        }
+      }
+    }
+
+    const dedupedForecasts = Array.from(
+      normalizedForecasts.reduce((map, row) => {
+        map.set(`${row.year}:${row.metric}`, row)
+        return map
+      }, new Map<string, { year: number; metric: string; value: number; unit: string; source: 'rystad_report' }>())
+      .values()
+    )
+
+    const existingDocRes = await supabase
       .from('documents')
       .select('id')
       .eq('file_name', job.file_name)
+      .order('created_at', { ascending: false })
       .limit(1)
 
-    let documentId: string
-    if (existingDoc && existingDoc.length > 0) {
-      documentId = existingDoc[0].id
+    if (existingDocRes.error) {
+      throw new Error(existingDocRes.error.message)
+    }
+
+    if (existingDocRes.data && existingDocRes.data.length > 0) {
       await supabase
         .from('documents')
         .update({
-          ai_summary: `## ${reportPeriod}\n\n${summary}\n\n### Key Figures\n${JSON.stringify(keyFigures, null, 2)}`,
+          ai_summary: aiSummary,
           file_path: `${job.storage_bucket}/${job.storage_path}`,
           file_size_bytes: buffer.length,
         })
-        .eq('id', documentId)
+        .eq('id', existingDocRes.data[0].id)
     } else {
+      const systemUserId = await getSystemUserId(supabase)
       const { data: doc, error: docError } = await supabase
         .from('documents')
         .insert({
-          uploaded_by: null,
+          uploaded_by: systemUserId,
           file_name: job.file_name,
           file_path: `${job.storage_bucket}/${job.storage_path}`,
           file_type: 'application/pdf',
           file_size_bytes: buffer.length,
-          ai_summary: `## ${reportPeriod}\n\n${summary}\n\n### Key Figures\n${JSON.stringify(keyFigures, null, 2)}`,
+          ai_summary: aiSummary,
         })
         .select('id')
         .single()
@@ -648,43 +983,35 @@ Return ONLY valid JSON, no other text.`,
       if (docError || !doc) {
         throw new Error(docError?.message || 'Failed to create market report document')
       }
-
-      documentId = doc.id
     }
 
     let forecastsImported = 0
-    if (forecasts.length > 0) {
-      const forecastRows = forecasts.map((f) => ({
-        year: f.year,
-        metric: f.metric,
-        value: f.value,
-        unit: f.unit,
-        source: 'rystad_report',
-      }))
-
-      for (const row of forecastRows) {
+    let forecastsSkipped = 0
+    if (dedupedForecasts.length > 0) {
+      for (const row of dedupedForecasts) {
         const { error } = await supabase
           .from('forecasts')
           .upsert(row, { onConflict: 'year,metric', ignoreDuplicates: false })
 
         if (!error) forecastsImported++
+        if (error) forecastsSkipped++
       }
     }
 
-    const total = forecasts.length + 1
+    const total = dedupedForecasts.length + 1
     const imported = forecastsImported + 1
 
     await completeBatch(supabase, batchId, {
       total,
       imported,
-      skipped: 0,
+      skipped: forecastsSkipped,
     })
 
     return {
       batchId,
       recordsTotal: total,
       recordsImported: imported,
-      recordsSkipped: 0,
+      recordsSkipped: forecastsSkipped,
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

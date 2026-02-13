@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
+import { createClient } from '@/lib/supabase/client'
 import {
   Area,
   AreaChart,
@@ -74,6 +75,9 @@ interface ForecastRecord {
 interface ReportRecord {
   id: string
   file_name: string
+  file_path?: string | null
+  download_url?: string | null
+  report_period?: string | null
   ai_summary: string | null
   created_at: string
 }
@@ -107,9 +111,198 @@ const REGION_KEYS = [
 
 const NORTH_SEA_COUNTRIES = new Set(['norway', 'norge', 'united kingdom', 'uk', 'denmark', 'netherlands', 'germany'])
 const GOM_COUNTRIES = new Set(['united states', 'usa', 'mexico', 'trinidad', 'trinidad and tobago'])
+const REGION_METRIC_KEYS = new Set(REGION_KEYS.map((region) => region.key))
+const GLOBAL_SPEND_METRIC_ALIASES = [
+  'subsea_spend_usd_bn',
+  'subsea_spending_usd_bn',
+  'subsea_market_spend_total_usd_bn',
+  'subsea_spend_total_usd_bn',
+  'subsea_capex_usd_bn',
+  'subsea_capex_total_usd_bn',
+  'total_subsea_capex_usd_bn',
+  'global_subsea_spend_usd_bn',
+  'global_subsea_capex_usd_bn',
+]
+const XMT_METRIC_ALIASES = [
+  'xmt_installations',
+  'xmt_installations_count',
+  'xmt_installs',
+  'xmt_forecast_units',
+  'xmt_units',
+  'xmt_trees',
+]
+const SURF_METRIC_ALIASES = [
+  'surf_installations_km',
+  'surf_km',
+  'surf_km_forecast',
+  'surf_installations',
+]
+const GROWTH_METRIC_ALIASES = [
+  'subsea_capex_growth_yoy_pct',
+  'capex_growth_yoy_pct',
+  'subsea_growth_pct',
+  'yoy_growth_pct',
+]
+const BRENT_METRIC_ALIASES = [
+  'brent_avg_usd_per_bbl',
+  'brent_usd_per_bbl',
+  'brent_price_usd',
+]
 
 function normalize(input: string | undefined): string {
   return (input ?? '').trim().toLowerCase()
+}
+
+function normalizeMetricName(metric: string | null | undefined): string {
+  return (metric ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function parseNumericText(value: string | null | undefined): number | null {
+  if (!value) return null
+  const match = value.replace(/,/g, '').match(/-?\d+(\.\d+)?/)
+  if (!match) return null
+  const parsed = Number(match[0])
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseYearFromText(value: string | null | undefined): number | null {
+  if (!value) return null
+  const match = value.match(/\b(19|20)\d{2}\b/)
+  if (!match) return null
+  const parsed = Number(match[0])
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function extractJsonObjectBlock(input: string): string | null {
+  const start = input.indexOf('{')
+  if (start < 0) return null
+
+  let depth = 0
+  let inString = false
+  let escaping = false
+
+  for (let i = start; i < input.length; i++) {
+    const char = input[i]
+
+    if (inString) {
+      if (escaping) {
+        escaping = false
+      } else if (char === '\\') {
+        escaping = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+
+    if (char === '{') depth++
+    if (char === '}') {
+      depth--
+      if (depth === 0) return input.slice(start, i + 1)
+    }
+  }
+
+  return null
+}
+
+function isGlobalSpendMetric(metric: string): boolean {
+  const normalizedMetric = normalizeMetricName(metric)
+  if (GLOBAL_SPEND_METRIC_ALIASES.includes(normalizedMetric)) return true
+  if (REGION_METRIC_KEYS.has(normalizedMetric)) return false
+  if (/(europe|south_america|north_america|africa|asia|australia|middle_east|russia)/.test(normalizedMetric)) {
+    return false
+  }
+
+  const looksLikeGlobalSubseaSpend =
+    normalizedMetric.includes('subsea') &&
+    (normalizedMetric.includes('spend') || normalizedMetric.includes('capex')) &&
+    (normalizedMetric.includes('usd') || normalizedMetric.includes('bn'))
+
+  return looksLikeGlobalSubseaSpend
+}
+
+function isXmtMetric(metric: string): boolean {
+  const normalizedMetric = normalizeMetricName(metric)
+  if (XMT_METRIC_ALIASES.includes(normalizedMetric)) return true
+  return normalizedMetric.includes('xmt') && (
+    normalizedMetric.includes('install') ||
+    normalizedMetric.includes('unit') ||
+    normalizedMetric.includes('count')
+  )
+}
+
+function isSurfMetric(metric: string): boolean {
+  const normalizedMetric = normalizeMetricName(metric)
+  if (SURF_METRIC_ALIASES.includes(normalizedMetric)) return true
+  return normalizedMetric.includes('surf') && (
+    normalizedMetric.includes('km') ||
+    normalizedMetric.includes('install') ||
+    normalizedMetric.includes('line')
+  )
+}
+
+function isGrowthMetric(metric: string): boolean {
+  const normalizedMetric = normalizeMetricName(metric)
+  if (GROWTH_METRIC_ALIASES.includes(normalizedMetric)) return true
+  return (normalizedMetric.includes('growth') || normalizedMetric.includes('yoy')) &&
+    (normalizedMetric.includes('subsea') || normalizedMetric.includes('capex') || normalizedMetric.includes('spend'))
+}
+
+function isBrentMetric(metric: string): boolean {
+  const normalizedMetric = normalizeMetricName(metric)
+  if (BRENT_METRIC_ALIASES.includes(normalizedMetric)) return true
+  return normalizedMetric.includes('brent') && (
+    normalizedMetric.includes('usd') ||
+    normalizedMetric.includes('bbl') ||
+    normalizedMetric.includes('barrel')
+  )
+}
+
+function getMetricPriorityIndex(metric: string, preferredMetrics: string[]): number {
+  const normalizedMetric = normalizeMetricName(metric)
+  const index = preferredMetrics.findIndex((item) => normalizeMetricName(item) === normalizedMetric)
+  return index < 0 ? Number.MAX_SAFE_INTEGER : index
+}
+
+function pickMetricByPriority(source: ForecastRecord[], preferredMetrics: string[]): ForecastRecord | null {
+  if (!source.length) return null
+  if (!preferredMetrics.length) return source[0]
+
+  const sorted = [...source].sort((a, b) => {
+    const aPriority = getMetricPriorityIndex(a.metric, preferredMetrics)
+    const bPriority = getMetricPriorityIndex(b.metric, preferredMetrics)
+    if (aPriority !== bPriority) return aPriority - bPriority
+    return normalizeMetricName(a.metric).localeCompare(normalizeMetricName(b.metric))
+  })
+
+  return sorted[0] ?? null
+}
+
+function buildMetricSeriesByYear(
+  source: ForecastRecord[],
+  matcher: (metric: string) => boolean,
+  preferredMetrics: string[]
+): ForecastRecord[] {
+  const perYear = new Map<number, ForecastRecord[]>()
+
+  source.forEach((forecast) => {
+    if (!matcher(forecast.metric)) return
+    if (!perYear.has(forecast.year)) perYear.set(forecast.year, [])
+    perYear.get(forecast.year)!.push(forecast)
+  })
+
+  return Array.from(perYear.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, records]) => pickMetricByPriority(records, preferredMetrics))
+    .filter((record): record is ForecastRecord => Boolean(record))
 }
 
 function parseYearValue(value: unknown): number | null {
@@ -247,44 +440,27 @@ interface ParsedReport {
   title: string | null
   highlights: string[]
   keyFigures: { label: string; value: string }[]
+  narrative: string
 }
 
 function parseReportSummary(summary: string | null): ParsedReport {
-  const empty: ParsedReport = { title: null, highlights: [], keyFigures: [] }
+  const empty: ParsedReport = { title: null, highlights: [], keyFigures: [], narrative: '' }
   if (!summary) return empty
 
   try {
-    // Extract title from first ## heading
-    const headingMatch = summary.match(/^##\s+(.+)$/m)
-    const title = headingMatch ? headingMatch[1].trim() : null
+    const content = summary.trim()
+    const headingMatch = content.match(/^##\s+(.+)$/m)
+    let title = headingMatch ? headingMatch[1].trim() : null
 
-    // Extract bullet points (lines starting with - or *)
-    const bullets = summary.match(/^[\-\*]\s+(.+)$/gm)
-    const highlights = (bullets || [])
-      .map((b) => b.replace(/^[\-\*]\s+/, '').trim())
-      .filter((b) => b.length > 10)
-      .slice(0, 4)
+    const keyFigureSectionMatch = content.match(/###\s*Key Figures[\s\S]*$/i)
+    const keyFigureSection = keyFigureSectionMatch ? keyFigureSectionMatch[0] : ''
+    const keyFigureJsonMatch = keyFigureSection.match(/```(?:json)?\s*([\s\S]*?)```/i)
+    const keyFigureJson = keyFigureJsonMatch?.[1] || extractJsonObjectBlock(keyFigureSection) || null
 
-    // If no bullets, extract first sentences from paragraphs
-    const finalHighlights = highlights.length > 0
-      ? highlights
-      : summary
-          .split(/\n\n+/)
-          .map((p) => p.replace(/^#+\s+.*$/m, '').trim())
-          .filter((p) => p.length > 20 && !p.startsWith('{') && !p.startsWith('```'))
-          .map((p) => {
-            const firstSentence = p.match(/^[^.!?]+[.!?]/)
-            return firstSentence ? firstSentence[0].trim() : p.slice(0, 120) + '…'
-          })
-          .slice(0, 4)
-
-    // Extract Key Figures JSON block
     const keyFigures: { label: string; value: string }[] = []
-    const jsonMatch = summary.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || summary.match(/\{[\s\S]*"[^"]+"\s*:\s*[\s\S]*\}/)
-    if (jsonMatch) {
+    if (keyFigureJson) {
       try {
-        const jsonStr = jsonMatch[1] || jsonMatch[0]
-        const parsed = JSON.parse(jsonStr)
+        const parsed = JSON.parse(keyFigureJson)
         if (typeof parsed === 'object' && parsed !== null) {
           for (const [key, val] of Object.entries(parsed)) {
             if (keyFigures.length >= 6) break
@@ -297,10 +473,58 @@ function parseReportSummary(summary: string | null): ParsedReport {
       }
     }
 
-    return { title, highlights: finalHighlights, keyFigures }
+    const bulletMatches = content.match(/^\s*(?:[-*•]|\d+\.)\s+(.+)$/gm) || []
+    let highlights = bulletMatches
+      .map((line) => line.replace(/^\s*(?:[-*•]|\d+\.)\s+/, '').trim())
+      .filter((line) => line.length > 18)
+      .slice(0, 4)
+
+    const narrativeBase = content
+      .replace(/###\s*Key Figures[\s\S]*$/i, '')
+      .replace(/^##\s+.*$/gm, '')
+      .replace(/^###\s+.*$/gm, '')
+      .trim()
+
+    if (!highlights.length) {
+      highlights = narrativeBase
+        .split(/\n\n+/)
+        .map((block) => block.trim())
+        .filter((block) => block.length > 20)
+        .map((block) => {
+          const sentence = block.match(/^[^.!?]+[.!?]/)
+          return sentence ? sentence[0].trim() : `${block.slice(0, 140).trim()}…`
+        })
+        .slice(0, 4)
+    }
+
+    const narrative = narrativeBase
+      .replace(/^\s*(?:[-*•]|\d+\.)\s+/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+
+    if (!title) {
+      const jsonBlock = extractJsonObjectBlock(content)
+      if (jsonBlock) {
+        try {
+          const parsed = JSON.parse(jsonBlock) as Record<string, unknown>
+          if (typeof parsed.report_period === 'string' && parsed.report_period.trim()) {
+            title = parsed.report_period.trim()
+          }
+        } catch {
+          // ignore JSON parse fallback errors
+        }
+      }
+    }
+
+    return { title, highlights, keyFigures, narrative }
   } catch {
     // Fallback: truncated text
-    return { title: null, highlights: [summary.slice(0, 200) + (summary.length > 200 ? '…' : '')], keyFigures: [] }
+    return {
+      title: null,
+      highlights: [summary.slice(0, 200) + (summary.length > 200 ? '…' : '')],
+      keyFigures: [],
+      narrative: summary,
+    }
   }
 }
 
@@ -386,46 +610,76 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     return () => window.clearTimeout(timeout)
   }, [highlightedProjectKey])
 
-  // Fetch market intelligence data
-  useEffect(() => {
-    async function fetchMarketData() {
-      try {
-        const res = await fetch('/api/dashboard/reports')
-        if (!res.ok) return
-        const data = await res.json()
-        setForecasts(data.forecasts || [])
-        setReports(data.reports || [])
-      } catch {
-        // silently fail - market intel is supplementary
-      } finally {
-        setMarketLoading(false)
-      }
+  const fetchMarketData = useCallback(async () => {
+    setMarketLoading(true)
+
+    try {
+      const res = await fetch('/api/dashboard/reports')
+      if (!res.ok) throw new Error(`Reports API returned ${res.status}`)
+      const data = await res.json()
+
+      const normalizedForecasts: ForecastRecord[] = (Array.isArray(data?.forecasts) ? data.forecasts : [])
+        .map((row: unknown) => {
+          const record = row && typeof row === 'object' ? row as Record<string, unknown> : {}
+          return {
+            year: Number(record.year),
+            metric: String(record.metric ?? ''),
+            value: Number(record.value),
+            unit: String(record.unit ?? ''),
+          }
+        })
+        .filter((row: ForecastRecord) => Number.isFinite(row.year) && Number.isFinite(row.value) && row.metric.length > 0)
+
+      const normalizedReports: ReportRecord[] = (Array.isArray(data?.reports) ? data.reports : [])
+        .map((row: unknown) => {
+          const record = row && typeof row === 'object' ? row as Record<string, unknown> : {}
+          return {
+            id: String(record.id ?? ''),
+            file_name: String(record.file_name ?? ''),
+            file_path: typeof record.file_path === 'string' ? record.file_path : null,
+            download_url: typeof record.download_url === 'string' ? record.download_url : null,
+            report_period: typeof record.report_period === 'string' ? record.report_period : null,
+            ai_summary: typeof record.ai_summary === 'string' ? record.ai_summary : null,
+            created_at: String(record.created_at ?? ''),
+          }
+        })
+        .filter((row: ReportRecord) => row.id.length > 0 && row.file_name.length > 0)
+
+      setForecasts(normalizedForecasts)
+      setReports(normalizedReports)
+    } catch (error) {
+      console.error('Failed to load market intelligence:', error)
+      setForecasts([])
+      setReports([])
+    } finally {
+      setMarketLoading(false)
     }
-    fetchMarketData()
   }, [])
+
+  useEffect(() => {
+    void fetchMarketData()
+  }, [fetchMarketData])
 
   // Derived market data
   const spendingByYear = useMemo(() => {
-    const spendMetrics = ['subsea_spend_usd_bn', 'subsea_spending_usd_bn', 'subsea_market_spend_total_usd_bn']
-    return forecasts
-      .filter((f) => spendMetrics.includes(f.metric))
-      .sort((a, b) => a.year - b.year)
+    return buildMetricSeriesByYear(forecasts, isGlobalSpendMetric, GLOBAL_SPEND_METRIC_ALIASES)
   }, [forecasts])
 
   const xmtByYear = useMemo(() => {
-    return forecasts
-      .filter((f) => f.metric === 'xmt_installations')
-      .sort((a, b) => a.year - b.year)
+    return buildMetricSeriesByYear(forecasts, isXmtMetric, XMT_METRIC_ALIASES)
   }, [forecasts])
 
   const regionalSpendData = useMemo(() => {
+    const regionLookup = new Map<string, string>(
+      REGION_KEYS.map((item) => [normalizeMetricName(item.key), item.label])
+    )
     const yearMap = new Map<number, Record<string, number>>()
     for (const f of forecasts) {
-      const regionKey = REGION_KEYS.find((r) => r.key === f.metric)
-      if (!regionKey) continue
+      const regionLabel = regionLookup.get(normalizeMetricName(f.metric))
+      if (!regionLabel) continue
       if (!yearMap.has(f.year)) yearMap.set(f.year, {})
       const entry = yearMap.get(f.year)!
-      entry[regionKey.label] = f.value
+      entry[regionLabel] = f.value
     }
     return Array.from(yearMap.entries())
       .map(([year, regions]) => ({ year, ...regions }))
@@ -433,22 +687,85 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   }, [forecasts])
 
   const latestMetrics = useMemo(() => {
-    if (!forecasts.length) return null
-    const maxYear = Math.max(...forecasts.map((f) => f.year))
-    const latest = forecasts.filter((f) => f.year === maxYear)
-    const get = (metrics: string[]) => {
-      const found = latest.find((f) => metrics.includes(f.metric))
-      return found ? { value: found.value, unit: found.unit } : null
+    const latestReport = reports.find((report) => Boolean(report.ai_summary))
+    const parsedLatestReport = parseReportSummary(latestReport?.ai_summary ?? null)
+
+    const getFromReportFigures = (aliases: string[]) => {
+      const normalizedAliases = aliases.map((alias) => normalizeMetricName(alias))
+
+      for (const figure of parsedLatestReport.keyFigures) {
+        const value = parseNumericText(figure.value)
+        if (value === null) continue
+
+        const normalizedLabel = normalizeMetricName(figure.label)
+        const isMatch = normalizedAliases.some(
+          (alias) => normalizedLabel.includes(alias) || alias.includes(normalizedLabel)
+        )
+
+        if (isMatch) {
+          return { value, unit: '' }
+        }
+      }
+
+      return null
     }
+
+    const maxYear = forecasts.length ? Math.max(...forecasts.map((f) => f.year)) : null
+    const latest = maxYear !== null ? forecasts.filter((f) => f.year === maxYear) : []
+    const getFromForecasts = (
+      matcher: (metric: string) => boolean,
+      preferredMetrics: string[]
+    ) => {
+      const candidates = latest.filter((item) => matcher(item.metric))
+      const picked = pickMetricByPriority(candidates, preferredMetrics)
+      return picked ? { value: picked.value, unit: picked.unit } : null
+    }
+
+    const spend = getFromForecasts(isGlobalSpendMetric, GLOBAL_SPEND_METRIC_ALIASES) ??
+      getFromReportFigures(['subsea_spend_usd_bn', 'total_subsea_capex_usd_bn'])
+    const xmt = getFromForecasts(isXmtMetric, XMT_METRIC_ALIASES) ??
+      getFromReportFigures(['xmt_installations', 'xmt_forecast_units'])
+    const surf = getFromForecasts(isSurfMetric, SURF_METRIC_ALIASES) ??
+      getFromReportFigures(['surf_km', 'surf_km_forecast'])
+    const growth = getFromForecasts(isGrowthMetric, GROWTH_METRIC_ALIASES) ??
+      getFromReportFigures(['subsea_capex_growth_yoy_pct', 'yoy_growth_pct'])
+    const brent = getFromForecasts(isBrentMetric, BRENT_METRIC_ALIASES) ??
+      getFromReportFigures(['brent_avg_usd_per_bbl', 'brent_price_usd'])
+
+    if (!spend && !xmt && !surf && !growth && !brent) return null
+
+    const fallbackYear = parseYearFromText(parsedLatestReport.title ?? '') ?? new Date().getFullYear()
+
     return {
-      year: maxYear,
-      spend: get(['subsea_spend_usd_bn', 'subsea_spending_usd_bn', 'subsea_market_spend_total_usd_bn', 'subsea_spend_total_usd_bn']),
-      xmt: get(['xmt_installations', 'xmt_installations_count', 'xmt_installs']),
-      surf: get(['surf_installations_km', 'surf_km', 'surf_installations']),
-      growth: get(['subsea_capex_growth_yoy_pct', 'capex_growth_yoy_pct', 'subsea_growth_pct']),
-      brent: get(['brent_avg_usd_per_bbl', 'brent_usd_per_bbl', 'brent_price_usd']),
+      year: maxYear ?? fallbackYear,
+      spend,
+      xmt,
+      surf,
+      growth,
+      brent,
     }
-  }, [forecasts])
+  }, [forecasts, reports])
+
+  const keyMetricCards = useMemo(() => {
+    if (!latestMetrics) return []
+
+    return [
+      { label: 'Total Subsea Spend', data: latestMetrics.spend, fmt: (v: number) => `$${v.toFixed(1)}B` },
+      { label: 'XMT Installations', data: latestMetrics.xmt, fmt: (v: number) => v.toLocaleString('en-US') },
+      { label: 'SURF km', data: latestMetrics.surf, fmt: (v: number) => `${v.toLocaleString('en-US')} km` },
+      { label: 'YoY Growth', data: latestMetrics.growth, fmt: (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%` },
+      { label: 'Brent Oil Price', data: latestMetrics.brent, fmt: (v: number) => `$${v.toFixed(0)}/bbl` },
+    ].filter((item) => item.data !== null)
+  }, [latestMetrics])
+
+  const reportStats = useMemo(() => {
+    return {
+      totalReports: reports.length,
+      withSummary: reports.filter((report) => Boolean(report.ai_summary?.trim())).length,
+      withPdf: reports.filter((report) => Boolean(report.download_url)).length,
+      forecastPoints: forecasts.length,
+    }
+  }, [forecasts, reports])
 
   const regionProjects = useMemo(
     () => projects.filter((project) => belongsToRegion(project, region)),
@@ -1056,14 +1373,35 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               <LoadingPlaceholder text="Ingen rapporter tilgjengelig" />
             ) : (
               <div className="flex flex-col gap-3 max-h-[500px] overflow-y-auto">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Rapporter</p>
+                    <p className="font-mono text-lg text-white">{reportStats.totalReports}</p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Med sammendrag</p>
+                    <p className="font-mono text-lg text-white">{reportStats.withSummary}</p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Med PDF-link</p>
+                    <p className="font-mono text-lg text-white">{reportStats.withPdf}</p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Forecast points</p>
+                    <p className="font-mono text-lg text-white">{reportStats.forecastPoints}</p>
+                  </div>
+                </div>
+
                 {reports.slice(0, 6).map((report) => {
                   const parsed = parseReportSummary(report.ai_summary)
+                  const hasNarrative = parsed.narrative.length > 0 || Boolean(report.ai_summary)
+
                   return (
                     <div key={report.id} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] overflow-hidden">
                       <div className="px-4 py-3">
                         <div className="flex justify-between items-start gap-2">
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white">{parsed.title || report.file_name}</p>
+                            <p className="text-sm font-semibold text-white">{report.report_period || parsed.title || report.file_name}</p>
                             <p className="text-xs text-[var(--text-muted)] font-mono mt-1">
                               {new Date(report.created_at).toLocaleDateString('nb-NO')}
                             </p>
@@ -1092,19 +1430,31 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                           </div>
                         )}
 
-                        {report.ai_summary && (
-                          <button
-                            type="button"
-                            onClick={() => setExpandedReport(expandedReport === report.id ? null : report.id)}
-                            className="mt-3 text-xs text-[var(--csub-light)] hover:text-white transition-colors cursor-pointer"
-                          >
-                            {expandedReport === report.id ? '▲ Skjul' : '▼ Les mer'}
-                          </button>
-                        )}
+                        <div className="mt-3 flex items-center gap-3">
+                          {hasNarrative && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedReport(expandedReport === report.id ? null : report.id)}
+                              className="text-xs text-[var(--csub-light)] hover:text-white transition-colors cursor-pointer"
+                            >
+                              {expandedReport === report.id ? '▲ Skjul sammendrag' : '▼ Les sammendrag'}
+                            </button>
+                          )}
+                          {report.download_url && (
+                            <a
+                              href={report.download_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-[var(--csub-gold)] hover:text-white transition-colors"
+                            >
+                              Open PDF
+                            </a>
+                          )}
+                        </div>
                       </div>
-                      {expandedReport === report.id && report.ai_summary && (
+                      {expandedReport === report.id && hasNarrative && (
                         <div className="px-4 pb-4 text-sm text-[var(--text-muted)] leading-relaxed border-t border-[var(--csub-light-faint)]">
-                          <p className="mt-3 whitespace-pre-line">{report.ai_summary}</p>
+                          <p className="mt-3 whitespace-pre-line">{parsed.narrative || report.ai_summary}</p>
                         </div>
                       )}
                     </div>
@@ -1119,22 +1469,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               <LoadingPlaceholder text="Laster nøkkeltall..." />
             ) : !latestMetrics ? (
               <LoadingPlaceholder text="Ingen forecast-data tilgjengelig" />
+            ) : !keyMetricCards.length ? (
+              <LoadingPlaceholder text="Fant forecast-data, men ingen gjenkjente KPI-metrikker." />
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {[
-                  { label: 'Total Subsea Spend', data: latestMetrics.spend, fmt: (v: number) => `$${v.toFixed(1)}B` },
-                  { label: 'XMT Installations', data: latestMetrics.xmt, fmt: (v: number) => v.toLocaleString('en-US') },
-                  { label: 'SURF km', data: latestMetrics.surf, fmt: (v: number) => `${v.toLocaleString('en-US')} km` },
-                  { label: 'YoY Growth', data: latestMetrics.growth, fmt: (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%` },
-                  { label: 'Brent Oil Price', data: latestMetrics.brent, fmt: (v: number) => `$${v.toFixed(0)}/bbl` },
-                ]
-                  .filter((item) => item.data)
-                  .map((item) => (
-                    <div key={item.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4">
-                      <span className="text-xs font-sans text-[var(--text-muted)] uppercase tracking-wider">{item.label}</span>
-                      <p className="text-2xl font-mono font-semibold text-white mt-2">{item.fmt(item.data!.value)}</p>
-                    </div>
-                  ))}
+                {keyMetricCards.map((item) => (
+                  <div key={item.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4">
+                    <span className="text-xs font-sans text-[var(--text-muted)] uppercase tracking-wider">{item.label}</span>
+                    <p className="text-2xl font-mono font-semibold text-white mt-2">{item.fmt(item.data!.value)}</p>
+                  </div>
+                ))}
               </div>
             )}
           </Panel>
@@ -1160,7 +1504,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </Panel>
 
           <Panel title="Dokumentopplasting">
-            <DropZone />
+            <DropZone onImportComplete={fetchMarketData} />
           </Panel>
         </section>
       </main>
@@ -1259,12 +1603,83 @@ function DrawerRow({ label, value }: { label: string; value?: string }) {
   )
 }
 
-function DropZone() {
-  const [dropped, setDropped] = useState(false)
+function sanitizeUploadFileName(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+}
+
+function DropZone({ onImportComplete }: { onImportComplete?: () => void }) {
   const [isDragging, setIsDragging] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const maxSizeBytes = 25 * 1024 * 1024
+
+  const queueMarketReport = useCallback(async (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setErrorMessage('Kun PDF støttes her.')
+      return
+    }
+
+    if (file.size > maxSizeBytes) {
+      setErrorMessage(`Filen er for stor. Maks ${Math.round(maxSizeBytes / 1024 / 1024)}MB.`)
+      return
+    }
+
+    setErrorMessage(null)
+    setStatusMessage('Laster opp PDF...')
+    setUploading(true)
+
+    try {
+      const supabase = createClient()
+      const cleanName = sanitizeUploadFileName(file.name)
+      const storagePath = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${cleanName}`
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from('imports')
+        .upload(storagePath, file, {
+          contentType: file.type || 'application/pdf',
+          upsert: false,
+        })
+
+      if (uploadError) {
+        throw new Error(uploadError.message)
+      }
+
+      setStatusMessage('Kjører AI-ekstraksjon...')
+      const response = await fetch('/api/import/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_name: file.name,
+          file_size_bytes: file.size,
+          storage_bucket: 'imports',
+          storage_path: storagePath,
+        }),
+      })
+
+      const payload = await response.json()
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || `Kunne ikke starte import (${response.status})`)
+      }
+
+      setStatusMessage('Rapport i kø. Oppdateres automatisk når analysen er ferdig.')
+      onImportComplete?.()
+      window.setTimeout(() => onImportComplete?.(), 8000)
+      window.setTimeout(() => onImportComplete?.(), 18000)
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error))
+      setStatusMessage(null)
+    } finally {
+      setUploading(false)
+    }
+  }, [maxSizeBytes, onImportComplete])
 
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
+    if (uploading) return
     setIsDragging(true)
   }
 
@@ -1275,7 +1690,24 @@ function DropZone() {
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(false)
-    setDropped(true)
+    if (uploading) return
+    const droppedFile = event.dataTransfer.files?.[0]
+    if (!droppedFile) return
+    void queueMarketReport(droppedFile)
+  }
+
+  const onSelectFile = () => {
+    if (uploading) return
+
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.pdf,application/pdf'
+    input.onchange = (event) => {
+      const selectedFile = (event.target as HTMLInputElement).files?.[0]
+      if (!selectedFile) return
+      void queueMarketReport(selectedFile)
+    }
+    input.click()
   }
 
   return (
@@ -1288,11 +1720,15 @@ function DropZone() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onClick={onSelectFile}
     >
-      <div className="font-mono text-[var(--csub-gold)] text-base">{dropped ? 'Dokument mottatt' : 'Slipp dokumenter eller skjermbilder her'}</div>
-      <div className="text-xs mt-2 text-[var(--text-muted)]">
-        {dropped ? 'AI-analyse starter...' : 'AI analyserer og kobler til relevante kontrakter'}
+      <div className="font-mono text-[var(--csub-gold)] text-base">
+        {uploading ? 'Laster opp markedsrapport...' : 'Slipp PDF her eller klikk for opplasting'}
       </div>
+      <div className="text-xs mt-2 text-[var(--text-muted)]">
+        {statusMessage || 'PDF analyseres med AI, forecasts og nøkkeltall oppdateres automatisk.'}
+      </div>
+      {errorMessage && <div className="mt-3 text-xs text-red-400">{errorMessage}</div>}
     </div>
   )
 }
