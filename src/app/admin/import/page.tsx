@@ -2,6 +2,8 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import Image from 'next/image'
+import Link from 'next/link'
 
 interface ImportJob {
   id: string
@@ -28,6 +30,20 @@ function sanitizeFileName(name: string): string {
   return name
     .normalize('NFKD')
     .replace(/[^a-zA-Z0-9._-]/g, '_')
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    pending: 'bg-[rgba(201,168,76,0.15)] text-[#c9a84c] border border-[rgba(201,168,76,0.3)]',
+    processing: 'bg-[rgba(77,184,158,0.15)] text-[#4db89e] border border-[rgba(77,184,158,0.3)]',
+    completed: 'bg-[rgba(34,197,94,0.15)] text-[#22c55e] border border-[rgba(34,197,94,0.3)]',
+    failed: 'bg-[rgba(239,68,68,0.15)] text-[#ef4444] border border-[rgba(239,68,68,0.3)]',
+  }
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${styles[status] || styles.pending}`}>
+      {status}
+    </span>
+  )
 }
 
 function UploadZone({
@@ -118,9 +134,9 @@ function UploadZone({
   }
 
   return (
-    <div className="border rounded-lg p-6 bg-white shadow-sm">
-      <h3 className="text-lg font-semibold mb-2">{title}</h3>
-      <p className="text-sm text-gray-500 mb-4">{description}</p>
+    <div className="bg-[var(--csub-dark)] rounded-xl border border-[var(--csub-light-soft)] shadow-lg p-6">
+      <h3 className="text-lg font-semibold text-white mb-2">{title}</h3>
+      <p className="text-sm text-[var(--text-muted)] mb-4">{description}</p>
 
       <div
         onDragOver={(e) => {
@@ -130,7 +146,9 @@ function UploadZone({
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-          dragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+          dragOver
+            ? 'border-[var(--csub-light)] bg-[rgba(77,184,158,0.1)]'
+            : 'border-[var(--csub-light-soft)] bg-[rgba(10,23,20,0.5)] hover:border-[var(--csub-light)]'
         }`}
         onClick={() => {
           const input = document.createElement('input')
@@ -154,27 +172,31 @@ function UploadZone({
       >
         {file ? (
           <div>
-            <p className="font-medium">{file.name}</p>
-            <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+            <p className="font-medium text-white">{file.name}</p>
+            <p className="text-sm text-[var(--text-muted)]">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
           </div>
         ) : (
-          <p className="text-gray-400">Drop file here or click to select</p>
+          <p className="text-[var(--text-muted)]">Drop file here or click to select</p>
         )}
       </div>
-      <p className="mt-2 text-xs text-gray-500">Maks filstørrelse: {Math.round(maxSizeBytes / 1024 / 1024)}MB</p>
+      <p className="mt-2 text-xs text-[var(--text-muted)]">Maks filstørrelse: {Math.round(maxSizeBytes / 1024 / 1024)}MB</p>
 
       <button
         onClick={handleUpload}
         disabled={!file || uploading}
-        className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="mt-4 px-4 py-2 bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold rounded-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
       >
         {uploading ? 'Uploading...' : 'Import'}
       </button>
 
-      {stage && <p className="mt-3 text-xs text-gray-500">{stage}</p>}
+      {stage && <p className="mt-3 text-xs text-[var(--text-muted)]">{stage}</p>}
 
       {result && (
-        <div className={`mt-4 p-3 rounded text-sm ${result.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+        <div className={`mt-4 p-3 rounded-lg text-sm ${
+          result.success
+            ? 'bg-[rgba(34,197,94,0.1)] text-[#22c55e] border border-[rgba(34,197,94,0.2)]'
+            : 'bg-[rgba(239,68,68,0.1)] text-[#ef4444] border border-[rgba(239,68,68,0.2)]'
+        }`}>
           {result.success ? (
             <div>
               <p className="font-medium">✅ Job queued</p>
@@ -218,79 +240,94 @@ export default function ImportPage() {
   }, [loadJobs])
 
   return (
-    <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-2xl font-bold mb-6">Data Import</h1>
+    <div className="min-h-screen bg-[var(--bg-dark)] text-white">
+      {/* Header */}
+      <header className="border-b border-[var(--csub-light-faint)] bg-[var(--csub-dark)]">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Image src="/csub-logo.svg" alt="CSUB" width={40} height={40} />
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">Data Import</h1>
+              <p className="text-xs text-[var(--text-muted)]">Upload and manage data imports</p>
+            </div>
+          </div>
+          <Link
+            href="/"
+            className="text-sm text-[var(--csub-light)] hover:text-white transition-colors flex items-center gap-1"
+          >
+            ← Back to Dashboard
+          </Link>
+        </div>
+      </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <UploadZone
-          title="Rystad Excel (Forecast/EPC)"
-          description="Upload XMTs, Surf lines, Subsea Units and Upcoming awards Excel file"
-          endpoint="/api/import/excel"
-          onQueued={loadJobs}
-        />
-        <UploadZone
-          title="PDF (Auto-detect)"
-          description="Upload any PDF — auto-detects Contract Updates vs Market Reports"
-          endpoint="/api/import/auto"
-          onQueued={loadJobs}
-        />
-        <UploadZone
-          title="Market Reports"
-          description="Upload Subsea Market Report PDFs for AI summary & forecast extraction"
-          endpoint="/api/import/report"
-          onQueued={loadJobs}
-        />
-      </div>
+      <main className="max-w-6xl mx-auto px-6 py-8">
+        {/* Upload Zones */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          <UploadZone
+            title="Rystad Excel (Forecast/EPC)"
+            description="Upload XMTs, Surf lines, Subsea Units and Upcoming awards Excel file"
+            endpoint="/api/import/excel"
+            onQueued={loadJobs}
+          />
+          <UploadZone
+            title="PDF (Auto-detect)"
+            description="Upload any PDF — auto-detects Contract Updates vs Market Reports"
+            endpoint="/api/import/auto"
+            onQueued={loadJobs}
+          />
+          <UploadZone
+            title="Market Reports"
+            description="Upload Subsea Market Report PDFs for AI summary & forecast extraction"
+            endpoint="/api/import/report"
+            onQueued={loadJobs}
+          />
+        </div>
 
-      <h2 className="text-xl font-semibold mb-4">Recent Imports</h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="bg-gray-50">
-              <th className="text-left p-2 border">File</th>
-              <th className="text-left p-2 border">Type</th>
-              <th className="text-left p-2 border">Status</th>
-              <th className="text-right p-2 border">Total</th>
-              <th className="text-right p-2 border">Imported</th>
-              <th className="text-right p-2 border">Skipped</th>
-              <th className="text-left p-2 border">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((job) => (
-              <tr key={job.id} className="hover:bg-gray-50">
-                <td className="p-2 border truncate max-w-[220px]">{job.file_name}</td>
-                <td className="p-2 border">{job.file_type}</td>
-                <td className="p-2 border">
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs ${
-                      job.status === 'completed'
-                        ? 'bg-green-100 text-green-800'
-                        : job.status === 'failed'
-                          ? 'bg-red-100 text-red-800'
-                          : job.status === 'processing'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                    }`}
-                  >
-                    {job.status}
-                  </span>
-                  {job.error_message && <p className="text-[11px] text-red-700 mt-1">{job.error_message}</p>}
-                </td>
-                <td className="p-2 border text-right">{job.records_total || 0}</td>
-                <td className="p-2 border text-right">{job.records_imported || 0}</td>
-                <td className="p-2 border text-right">{job.records_skipped || 0}</td>
-                <td className="p-2 border">{new Date(job.created_at).toLocaleString()}</td>
-              </tr>
-            ))}
-            {jobs.length === 0 && (
-              <tr>
-                <td colSpan={7} className="p-4 text-center text-gray-400">No imports yet</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+        {/* Recent Imports Table */}
+        <div className="bg-[var(--csub-dark)] rounded-xl border border-[var(--csub-light-soft)] shadow-lg overflow-hidden">
+          <div className="px-6 py-4 border-b border-[var(--csub-light-faint)]">
+            <h2 className="text-lg font-semibold">Recent Imports</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--csub-light-faint)] text-[var(--text-muted)]">
+                  <th className="text-left px-4 py-3 font-medium">File</th>
+                  <th className="text-left px-4 py-3 font-medium">Type</th>
+                  <th className="text-left px-4 py-3 font-medium">Status</th>
+                  <th className="text-right px-4 py-3 font-medium">Total</th>
+                  <th className="text-right px-4 py-3 font-medium">Imported</th>
+                  <th className="text-right px-4 py-3 font-medium">Skipped</th>
+                  <th className="text-left px-4 py-3 font-medium">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.map((job) => (
+                  <tr key={job.id} className="border-b border-[var(--csub-light-faint)] hover:bg-[rgba(77,184,158,0.05)] transition-colors">
+                    <td className="px-4 py-3 truncate max-w-[220px] text-white">{job.file_name}</td>
+                    <td className="px-4 py-3 text-[var(--text-muted)]">{job.file_type}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={job.status} />
+                      {job.error_message && (
+                        <p className="text-[11px] text-[#ef4444] mt-1">{job.error_message}</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-[var(--text-muted)]">{job.records_total || 0}</td>
+                    <td className="px-4 py-3 text-right font-mono text-[var(--text-muted)]">{job.records_imported || 0}</td>
+                    <td className="px-4 py-3 text-right font-mono text-[var(--text-muted)]">{job.records_skipped || 0}</td>
+                    <td className="px-4 py-3 text-[var(--text-muted)]">{new Date(job.created_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+                {jobs.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">No imports yet</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </main>
     </div>
   )
 }
