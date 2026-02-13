@@ -29,6 +29,15 @@ const MapSection = dynamic(() => import('./MapSection'), {
   ),
 })
 
+const Dashboard3D = dynamic(() => import('./Dashboard3D'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[calc(100vh-64px)] bg-[var(--bg-dark)] border border-[var(--csub-light-soft)] rounded-xl grid place-items-center">
+      <span className="font-mono text-sm text-[var(--csub-light)]">Laster 3D-visning...</span>
+    </div>
+  ),
+})
+
 interface Stats {
   totalProjects: number
   totalSurfKm: number
@@ -575,6 +584,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [reports, setReports] = useState<ReportRecord[]>([])
   const [marketLoading, setMarketLoading] = useState(true)
   const [expandedReport, setExpandedReport] = useState<string | null>(null)
+  const [is3DView, setIs3DView] = useState(false)
 
   const userLabel = getUserDisplayName(userEmail)
   const userInitials = getInitials(userLabel)
@@ -767,6 +777,41 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     }
   }, [forecasts, reports])
 
+  const projects3D = useMemo(() => {
+    return projects.map((project) => ({
+      development_project: project.development_project || 'Unknown',
+      country: project.country || 'Unknown',
+      continent: project.continent || 'Unknown',
+      operator: project.operator || 'Unknown',
+      surf_contractor: project.surf_contractor || 'Unknown',
+      facility_category: project.facility_category || 'Unknown',
+      water_depth_category: project.water_depth_category || 'Unknown',
+      xmt_count: Number.isFinite(Number(project.xmt_count)) ? Number(project.xmt_count) : 0,
+      surf_km: Number.isFinite(Number(project.surf_km)) ? Number(project.surf_km) : 0,
+      first_year: Number.isFinite(Number(project.first_year)) ? Number(project.first_year) : 0,
+      last_year: Number.isFinite(Number(project.last_year)) ? Number(project.last_year) : 0,
+    }))
+  }, [projects])
+
+  const reports3D = useMemo(() => {
+    return reports.map((report) => ({
+      file_name: report.file_name,
+      ai_summary: report.ai_summary ?? '',
+      created_at: report.created_at,
+    }))
+  }, [reports])
+
+  const toggle3DView = useCallback(() => {
+    setIs3DView((previous) => {
+      const next = !previous
+      if (next) {
+        setDrawerOpen(false)
+        setSelectedProject(null)
+      }
+      return next
+    })
+  }, [])
+
   const regionProjects = useMemo(
     () => projects.filter((project) => belongsToRegion(project, region)),
     [projects, region]
@@ -914,6 +959,17 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 EN
               </button>
             </div>
+            <button
+              type="button"
+              onClick={toggle3DView}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors cursor-pointer ${
+                is3DView
+                  ? 'bg-[var(--csub-gold)] text-[var(--csub-dark)] border-[var(--csub-gold)]'
+                  : 'bg-[var(--csub-dark)] text-[var(--text-muted)] border-[var(--csub-light-soft)] hover:text-white'
+              }`}
+            >
+              3D View
+            </button>
             <div className="hidden md:flex items-center gap-2 rounded-full bg-[var(--csub-dark)] border border-[var(--csub-light-soft)] px-3 py-1.5">
               <div className="w-7 h-7 rounded-full bg-[var(--csub-gold)] text-[var(--csub-dark)] grid place-items-center text-xs font-bold">
                 {userInitials}
@@ -930,7 +986,18 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto p-4 md:p-8 space-y-8">
+      <main className={is3DView ? 'w-full' : 'max-w-[1600px] mx-auto p-4 md:p-8 space-y-8'}>
+        {is3DView ? (
+          <section className="w-full">
+            <Dashboard3D
+              projects={projects3D}
+              forecasts={forecasts}
+              reports={reports3D}
+              onBack={() => setIs3DView(false)}
+            />
+          </section>
+        ) : (
+          <>
         {loadError && (
           <section className="rounded-xl border border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.1)] px-4 py-3 text-sm text-[var(--csub-gold)] font-mono">
             Datafeil: {loadError}
@@ -1507,41 +1574,45 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             <DropZone onImportComplete={fetchMarketData} />
           </Panel>
         </section>
-      </main>
-
-      {drawerOpen && <div className="fixed inset-0 bg-black/50 z-[200]" onClick={closeDrawer} />}
-      <div className={`fixed top-0 right-0 bottom-0 w-[520px] max-w-[90vw] bg-[var(--csub-dark)] z-[201] transition-transform duration-300 overflow-y-auto border-l border-[var(--csub-light-soft)] ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-        {selectedProject && (
-          <>
-            <div className="sticky top-0 z-10 p-5 text-white flex justify-between items-start border-b border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.95)]">
-              <div>
-                <h3 className="text-lg font-semibold mb-1">{selectedProject.development_project || 'Ukjent prosjekt'}</h3>
-                <div className="text-xs text-[var(--text-muted)]">
-                  {selectedProject.surf_contractor || 'N/A'}
-                  {' -> '}
-                  {selectedProject.operator || 'N/A'}
-                </div>
-              </div>
-              <button onClick={closeDrawer} className="text-white text-2xl px-2 py-1 rounded hover:bg-white/15 cursor-pointer">
-                x
-              </button>
-            </div>
-            <div className="p-6">
-              <DrawerSection title="Kontraktdetaljer">
-                <DrawerRow label="Land" value={selectedProject.country} />
-                <DrawerRow label="Kontinent" value={selectedProject.continent} />
-                <DrawerRow label="Operatør" value={selectedProject.operator} />
-                <DrawerRow label="SURF Contractor" value={selectedProject.surf_contractor} />
-                <DrawerRow label="Kategori" value={selectedProject.facility_category} />
-                <DrawerRow label="Vanndybde" value={selectedProject.water_depth_category} />
-                <DrawerRow label="XMTs" value={(selectedProject.xmt_count || 0).toLocaleString('en-US')} />
-                <DrawerRow label="SURF km" value={Math.round(selectedProject.surf_km || 0).toLocaleString('en-US')} />
-                <DrawerRow label="Periode" value={`${selectedProject.first_year || '?'} - ${selectedProject.last_year || '?'}`} />
-              </DrawerSection>
-            </div>
           </>
         )}
-      </div>
+      </main>
+
+      {!is3DView && drawerOpen && <div className="fixed inset-0 bg-black/50 z-[200]" onClick={closeDrawer} />}
+      {!is3DView && (
+        <div className={`fixed top-0 right-0 bottom-0 w-[520px] max-w-[90vw] bg-[var(--csub-dark)] z-[201] transition-transform duration-300 overflow-y-auto border-l border-[var(--csub-light-soft)] ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+          {selectedProject && (
+            <>
+              <div className="sticky top-0 z-10 p-5 text-white flex justify-between items-start border-b border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.95)]">
+                <div>
+                  <h3 className="text-lg font-semibold mb-1">{selectedProject.development_project || 'Ukjent prosjekt'}</h3>
+                  <div className="text-xs text-[var(--text-muted)]">
+                    {selectedProject.surf_contractor || 'N/A'}
+                    {' -> '}
+                    {selectedProject.operator || 'N/A'}
+                  </div>
+                </div>
+                <button onClick={closeDrawer} className="text-white text-2xl px-2 py-1 rounded hover:bg-white/15 cursor-pointer">
+                  x
+                </button>
+              </div>
+              <div className="p-6">
+                <DrawerSection title="Kontraktdetaljer">
+                  <DrawerRow label="Land" value={selectedProject.country} />
+                  <DrawerRow label="Kontinent" value={selectedProject.continent} />
+                  <DrawerRow label="Operatør" value={selectedProject.operator} />
+                  <DrawerRow label="SURF Contractor" value={selectedProject.surf_contractor} />
+                  <DrawerRow label="Kategori" value={selectedProject.facility_category} />
+                  <DrawerRow label="Vanndybde" value={selectedProject.water_depth_category} />
+                  <DrawerRow label="XMTs" value={(selectedProject.xmt_count || 0).toLocaleString('en-US')} />
+                  <DrawerRow label="SURF km" value={Math.round(selectedProject.surf_km || 0).toLocaleString('en-US')} />
+                  <DrawerRow label="Periode" value={`${selectedProject.first_year || '?'} - ${selectedProject.last_year || '?'}`} />
+                </DrawerSection>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
