@@ -13,6 +13,7 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
+  Legend,
   Tooltip,
   XAxis,
   YAxis,
@@ -63,6 +64,20 @@ interface Project {
   [key: string]: unknown
 }
 
+interface ForecastRecord {
+  year: number
+  metric: string
+  value: number
+  unit: string
+}
+
+interface ReportRecord {
+  id: string
+  file_name: string
+  ai_summary: string | null
+  created_at: string
+}
+
 type RegionFilter = 'All' | 'NorthSea' | 'GoM'
 type DashboardView = 'historical' | 'future'
 
@@ -79,6 +94,15 @@ interface ActivityItem {
 const DONUT_COLORS = ['#4db89e', '#38917f', '#2d7368', '#c9a84c', '#7dd4bf', '#245a4e']
 const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3c34']
 const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
+
+const REGION_KEYS = [
+  { key: 'europe_subsea_spend_total_usd_bn', label: 'Europe' },
+  { key: 'south_america_subsea_spend_total_usd_bn', label: 'South America' },
+  { key: 'north_america_subsea_spend_total_usd_bn', label: 'North America' },
+  { key: 'africa_subsea_spend_total_usd_bn', label: 'Africa' },
+  { key: 'asia_australia_subsea_spend_total_usd_bn', label: 'Asia/Australia' },
+  { key: 'middle_east_russia_subsea_spend_total_usd_bn', label: 'Middle East/Russia' },
+]
 
 const NORTH_SEA_COUNTRIES = new Set(['norway', 'norge', 'united kingdom', 'uk', 'denmark', 'netherlands', 'germany'])
 const GOM_COUNTRIES = new Set(['united states', 'usa', 'mexico', 'trinidad', 'trinidad and tobago'])
@@ -260,6 +284,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [region, setRegion] = useState<RegionFilter>('All')
   const [view, setView] = useState<DashboardView>('historical')
 
+  // Market Intelligence state
+  const [forecasts, setForecasts] = useState<ForecastRecord[]>([])
+  const [reports, setReports] = useState<ReportRecord[]>([])
+  const [marketLoading, setMarketLoading] = useState(true)
+  const [expandedReport, setExpandedReport] = useState<string | null>(null)
+
   const userLabel = getUserDisplayName(userEmail)
   const userInitials = getInitials(userLabel)
 
@@ -293,6 +323,70 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     const timeout = window.setTimeout(() => setHighlightedProjectKey(null), 2500)
     return () => window.clearTimeout(timeout)
   }, [highlightedProjectKey])
+
+  // Fetch market intelligence data
+  useEffect(() => {
+    async function fetchMarketData() {
+      try {
+        const res = await fetch('/api/dashboard/reports')
+        if (!res.ok) return
+        const data = await res.json()
+        setForecasts(data.forecasts || [])
+        setReports(data.reports || [])
+      } catch {
+        // silently fail - market intel is supplementary
+      } finally {
+        setMarketLoading(false)
+      }
+    }
+    fetchMarketData()
+  }, [])
+
+  // Derived market data
+  const spendingByYear = useMemo(() => {
+    const spendMetrics = ['subsea_spend_usd_bn', 'subsea_spending_usd_bn', 'subsea_market_spend_total_usd_bn']
+    return forecasts
+      .filter((f) => spendMetrics.includes(f.metric))
+      .sort((a, b) => a.year - b.year)
+  }, [forecasts])
+
+  const xmtByYear = useMemo(() => {
+    return forecasts
+      .filter((f) => f.metric === 'xmt_installations')
+      .sort((a, b) => a.year - b.year)
+  }, [forecasts])
+
+  const regionalSpendData = useMemo(() => {
+    const yearMap = new Map<number, Record<string, number>>()
+    for (const f of forecasts) {
+      const regionKey = REGION_KEYS.find((r) => r.key === f.metric)
+      if (!regionKey) continue
+      if (!yearMap.has(f.year)) yearMap.set(f.year, {})
+      const entry = yearMap.get(f.year)!
+      entry[regionKey.label] = f.value
+    }
+    return Array.from(yearMap.entries())
+      .map(([year, regions]) => ({ year, ...regions }))
+      .sort((a, b) => a.year - b.year)
+  }, [forecasts])
+
+  const latestMetrics = useMemo(() => {
+    if (!forecasts.length) return null
+    const maxYear = Math.max(...forecasts.map((f) => f.year))
+    const latest = forecasts.filter((f) => f.year === maxYear)
+    const get = (metrics: string[]) => {
+      const found = latest.find((f) => metrics.includes(f.metric))
+      return found ? { value: found.value, unit: found.unit } : null
+    }
+    return {
+      year: maxYear,
+      spend: get(['subsea_spend_usd_bn', 'subsea_spending_usd_bn', 'subsea_market_spend_total_usd_bn']),
+      xmt: get(['xmt_installations']),
+      surf: get(['surf_installations_km']),
+      growth: get(['subsea_capex_growth_yoy_pct']),
+      brent: get(['brent_avg_usd_per_bbl']),
+    }
+  }, [forecasts])
 
   const regionProjects = useMemo(
     () => projects.filter((project) => belongsToRegion(project, region)),
@@ -818,6 +912,140 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </Panel>
         </section>
 
+        {/* ── Market Intelligence ── */}
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Panel title="Global Subsea Spending Forecast">
+            {marketLoading ? (
+              <LoadingPlaceholder text="Laster markedsdata..." />
+            ) : !spendingByYear.length ? (
+              <LoadingPlaceholder text="Ingen spending-data tilgjengelig" />
+            ) : (
+              <div className="h-[300px]">
+                <ResponsiveContainer>
+                  <AreaChart data={spendingByYear}>
+                    <defs>
+                      <linearGradient id="spendGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#4db89e" stopOpacity={0.35} />
+                        <stop offset="100%" stopColor="#4db89e" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
+                    <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} tickFormatter={(v: number) => `$${v}B`} />
+                    <Tooltip content={<MarketTooltip unit="USD Bn" />} cursor={{ stroke: '#4db89e', strokeOpacity: 0.2 }} />
+                    <Area type="monotone" dataKey="value" stroke="#4db89e" fill="url(#spendGradient)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Panel>
+
+          <Panel title="XMT Installations Forecast">
+            {marketLoading ? (
+              <LoadingPlaceholder text="Laster markedsdata..." />
+            ) : !xmtByYear.length ? (
+              <LoadingPlaceholder text="Ingen XMT-data tilgjengelig" />
+            ) : (
+              <div className="h-[300px]">
+                <ResponsiveContainer>
+                  <BarChart data={xmtByYear}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
+                    <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
+                    <Tooltip content={<MarketTooltip unit="units" />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
+                    <Bar dataKey="value" fill="#4db89e" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Panel>
+        </section>
+
+        <section>
+          <Panel title="Regional Subsea Spending Breakdown">
+            {marketLoading ? (
+              <LoadingPlaceholder text="Laster regionale data..." />
+            ) : !regionalSpendData.length ? (
+              <LoadingPlaceholder text="Ingen regionale spending-data tilgjengelig" />
+            ) : (
+              <div className="h-[400px]">
+                <ResponsiveContainer>
+                  <BarChart data={regionalSpendData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
+                    <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} tickFormatter={(v: number) => `$${v}B`} />
+                    <Tooltip content={<RegionalTooltip />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
+                    <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                    {REGION_KEYS.map((r, i) => (
+                      <Bar key={r.key} dataKey={r.label} stackId="regions" fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Panel>
+        </section>
+
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Panel title="Siste markedsrapporter">
+            {marketLoading ? (
+              <LoadingPlaceholder text="Laster rapporter..." />
+            ) : !reports.length ? (
+              <LoadingPlaceholder text="Ingen rapporter tilgjengelig" />
+            ) : (
+              <div className="flex flex-col gap-3 max-h-[500px] overflow-y-auto">
+                {reports.slice(0, 6).map((report) => (
+                  <div key={report.id} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedReport(expandedReport === report.id ? null : report.id)}
+                      className="w-full text-left px-4 py-3 flex justify-between items-start gap-2 hover:bg-[color:rgba(77,184,158,0.08)] transition-colors cursor-pointer"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm text-white truncate">{report.file_name}</p>
+                        <p className="text-xs text-[var(--text-muted)] font-mono mt-1">
+                          {new Date(report.created_at).toLocaleDateString('nb-NO')}
+                        </p>
+                      </div>
+                      <span className="text-[var(--text-muted)] shrink-0">{expandedReport === report.id ? '▲' : '▼'}</span>
+                    </button>
+                    {expandedReport === report.id && report.ai_summary && (
+                      <div className="px-4 pb-4 text-sm text-[var(--text-muted)] leading-relaxed border-t border-[var(--csub-light-faint)]">
+                        <p className="mt-3">{report.ai_summary}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          <Panel title="Nøkkeltall" subtitle={latestMetrics ? `${latestMetrics.year}` : undefined}>
+            {marketLoading ? (
+              <LoadingPlaceholder text="Laster nøkkeltall..." />
+            ) : !latestMetrics ? (
+              <LoadingPlaceholder text="Ingen forecast-data tilgjengelig" />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {[
+                  { label: 'Total Subsea Spend', data: latestMetrics.spend, fmt: (v: number) => `$${v.toFixed(1)}B` },
+                  { label: 'XMT Installations', data: latestMetrics.xmt, fmt: (v: number) => v.toLocaleString('en-US') },
+                  { label: 'SURF km', data: latestMetrics.surf, fmt: (v: number) => `${v.toLocaleString('en-US')} km` },
+                  { label: 'YoY Growth', data: latestMetrics.growth, fmt: (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%` },
+                  { label: 'Brent Oil Price', data: latestMetrics.brent, fmt: (v: number) => `$${v.toFixed(0)}/bbl` },
+                ]
+                  .filter((item) => item.data)
+                  .map((item) => (
+                    <div key={item.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4">
+                      <span className="text-xs font-sans text-[var(--text-muted)] uppercase tracking-wider">{item.label}</span>
+                      <p className="text-2xl font-mono font-semibold text-white mt-2">{item.fmt(item.data!.value)}</p>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </Panel>
+        </section>
+
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Panel title={view === 'historical' ? 'Awards per ar' : 'Prosjekter per ar'}>
             {!viewCharts.byYear.length ? (
@@ -876,6 +1104,33 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+function MarketTooltip({ active, payload, label, unit }: { active?: boolean; payload?: Array<{ value?: number }>; label?: string | number; unit?: string }) {
+  if (!active || !payload?.length) return null
+  const raw = payload[0]?.value ?? 0
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  return (
+    <div className="bg-[var(--csub-dark)] p-3 rounded-lg border border-[var(--csub-light-soft)] shadow-xl">
+      <p className="text-xs text-[var(--text-muted)] mb-1">{label}</p>
+      <p className="font-mono text-base text-white">{value.toLocaleString('en-US')} {unit}</p>
+    </div>
+  )
+}
+
+function RegionalTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name?: string; value?: number; color?: string }>; label?: string | number }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-[var(--csub-dark)] p-3 rounded-lg border border-[var(--csub-light-soft)] shadow-xl max-w-[240px]">
+      <p className="text-xs text-[var(--text-muted)] mb-2 font-semibold">{label}</p>
+      {payload.map((entry) => (
+        <div key={entry.name} className="flex justify-between gap-4 text-xs py-0.5">
+          <span style={{ color: entry.color }}>{entry.name}</span>
+          <span className="font-mono text-white">${(entry.value ?? 0).toFixed(1)}B</span>
+        </div>
+      ))}
     </div>
   )
 }
