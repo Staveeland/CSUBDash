@@ -6,6 +6,16 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 const CHUNK_SIZE = 500
 
+let _systemUserId: string | null = null
+async function getSystemUserId(supabase: ReturnType<typeof createAdminClient>): Promise<string> {
+  if (_systemUserId) return _systemUserId
+  const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1 })
+  const userId = data?.users?.[0]?.id
+  if (!userId) throw new Error('No users found in auth.users — cannot set uploaded_by')
+  _systemUserId = userId
+  return userId
+}
+
 const SUPPORTED_JOB_TYPES = ['excel_rystad', 'pdf_contract_awards', 'pdf_market_report'] as const
 
 type ImportJobType = typeof SUPPORTED_JOB_TYPES[number]
@@ -625,7 +635,7 @@ Return ONLY valid JSON, no other text.`,
       const { data: doc, error: docError } = await supabase
         .from('documents')
         .insert({
-          uploaded_by: '00000000-0000-0000-0000-000000000000',
+          uploaded_by: (await getSystemUserId(supabase)),
           file_name: job.file_name,
           file_path: `${job.storage_bucket}/${job.storage_path}`,
           file_type: 'application/pdf',
