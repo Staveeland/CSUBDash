@@ -92,6 +92,9 @@ const CONTINENT_CENTERS: Record<string, [number, number, number]> = {
   'Middle East': [5, 0, 25],
 }
 
+const ORBIT_CENTER = new THREE.Vector3(0, 6, 0)
+const DEFAULT_CAMERA_POSITION = new THREE.Vector3(0, 30, 80)
+
 const getGlowColor = (hex: string, intensity = 2.5) => {
   const color = new THREE.Color(hex || THEME.muted)
   color.multiplyScalar(intensity)
@@ -521,22 +524,32 @@ function CameraManager({
 }) {
   const { camera } = useThree()
   const targetPosRef = useRef<THREE.Vector3 | null>(null)
+  const cameraPosRef = useRef<THREE.Vector3 | null>(null)
 
   useEffect(() => {
-    targetPosRef.current = selectedProject ? selectedProject.basePos.clone() : null
+    if (selectedProject) {
+      const target = selectedProject.basePos.clone()
+      targetPosRef.current = target
+      cameraPosRef.current = new THREE.Vector3(target.x + 10, target.y + 10, target.z + 15)
+      return
+    }
+
+    targetPosRef.current = ORBIT_CENTER.clone()
+    cameraPosRef.current = DEFAULT_CAMERA_POSITION.clone()
   }, [selectedProject])
 
   useFrame(() => {
     const targetPos = targetPosRef.current
-    if (!targetPos || !controlsRef.current) return
+    const cameraPos = cameraPosRef.current
+    if (!targetPos || !cameraPos || !controlsRef.current) return
 
-    const camTarget = new THREE.Vector3(targetPos.x + 10, targetPos.y + 10, targetPos.z + 15)
-    camera.position.lerp(camTarget, 0.05)
+    camera.position.lerp(cameraPos, 0.05)
     controlsRef.current.target.lerp(targetPos, 0.05)
     controlsRef.current.update()
 
-    if (camera.position.distanceTo(camTarget) < 0.5) {
+    if (camera.position.distanceTo(cameraPos) < 0.5 && controlsRef.current.target.distanceTo(targetPos) < 0.2) {
       targetPosRef.current = null
+      cameraPosRef.current = null
     }
   })
 
@@ -821,6 +834,51 @@ export default function Dashboard3D({
         </button>
       )}
 
+      <div style={{ ...panelStyle, position: 'absolute', top: '72px', left: '24px', width: '320px', zIndex: 40 }}>
+        <h2 style={{ margin: '0 0 12px 0', fontSize: '14px', color: THEME.primary, letterSpacing: '1px' }}>
+          SYSTEM SEARCH
+        </h2>
+        <input
+          type="text"
+          placeholder="Search projects or operators..."
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          style={{
+            width: '100%',
+            padding: '10px',
+            background: 'rgba(0,0,0,0.5)',
+            border: `1px solid ${THEME.muted}`,
+            color: THEME.text,
+            fontFamily: 'inherit',
+            outline: 'none',
+            borderRadius: '4px',
+            boxSizing: 'border-box',
+          }}
+        />
+      </div>
+
+      <div style={{ ...panelStyle, position: 'absolute', bottom: '24px', left: '24px', padding: '16px', minWidth: '200px', zIndex: 40 }}>
+        <div style={{ fontSize: '12px', color: THEME.muted, marginBottom: '12px', letterSpacing: '1px' }}>
+          CONTINENT CLUSTERS
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px' }}>
+          {Object.entries(CONTINENT_COLORS).map(([name, color]) => (
+            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+              <div
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  background: color,
+                  borderRadius: '2px',
+                  boxShadow: `0 0 8px ${color}`,
+                }}
+              />
+              <span>{name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <Canvas
         camera={{ position: [0, 30, 80], fov: 45 }}
         onPointerMissed={() => {
@@ -857,29 +915,6 @@ export default function Dashboard3D({
               fontFamily: 'monospace',
             }}
           >
-            <div style={{ ...panelStyle, position: 'absolute', top: '24px', left: '24px', width: '320px' }}>
-              <h2 style={{ margin: '0 0 12px 0', fontSize: '14px', color: THEME.primary, letterSpacing: '1px' }}>
-                SYSTEM SEARCH
-              </h2>
-              <input
-                type="text"
-                placeholder="Search projects or operators..."
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  background: 'rgba(0,0,0,0.5)',
-                  border: `1px solid ${THEME.muted}`,
-                  color: THEME.text,
-                  fontFamily: 'inherit',
-                  outline: 'none',
-                  borderRadius: '4px',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
             <div style={{ ...panelStyle, position: 'absolute', top: '24px', right: '24px', minWidth: '220px', textAlign: 'right' }}>
               <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', color: THEME.primary, letterSpacing: '1px' }}>
                 SCENE METRICS
@@ -895,28 +930,6 @@ export default function Dashboard3D({
               <div>
                 <div style={{ fontSize: '11px', color: THEME.muted, marginBottom: '2px' }}>TOTAL XMTs</div>
                 <div style={{ fontSize: '24px', color: THEME.primary }}>{stats.xmts.toLocaleString()}</div>
-              </div>
-            </div>
-
-            <div style={{ ...panelStyle, position: 'absolute', bottom: '24px', left: '24px', padding: '16px', minWidth: '200px' }}>
-              <div style={{ fontSize: '12px', color: THEME.muted, marginBottom: '12px', letterSpacing: '1px' }}>
-                CONTINENT CLUSTERS
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px' }}>
-                {Object.entries(CONTINENT_COLORS).map(([name, color]) => (
-                  <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                    <div
-                      style={{
-                        width: '12px',
-                        height: '12px',
-                        background: color,
-                        borderRadius: '2px',
-                        boxShadow: `0 0 8px ${color}`,
-                      }}
-                    />
-                    <span>{name}</span>
-                  </div>
-                ))}
               </div>
             </div>
 
