@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -25,22 +24,22 @@ interface Props {
 }
 
 export default function MapSection({ countryData }: Props) {
-  const maxCount = Math.max(...countryData.map(c => c.count || 0), 1)
+  const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
 
   return (
-    <div style={{ height: 400, borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+    <div className="relative w-full h-[400px] rounded-xl overflow-hidden z-0 border border-[var(--csub-light-soft)] shadow-lg">
       <MapContainer
         center={[20, 0]}
         zoom={2}
-        scrollWheelZoom={true}
-        style={{ height: '100%', width: '100%' }}
+        scrollWheelZoom={false}
+        className="w-full h-full bg-[var(--bg-dark)]"
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           subdomains="abcd"
         />
-        {countryData.map(entry => {
+        {countryData.map((entry) => {
           const coords = COUNTRY_COORDS[entry.country]
           if (!coords) return null
           const radius = Math.max(6, Math.sqrt(entry.count / maxCount) * 30)
@@ -50,15 +49,17 @@ export default function MapSection({ countryData }: Props) {
               center={coords}
               radius={radius}
               pathOptions={{
-                fillColor: '#2d7368',
-                color: '#1a3c34',
+                fillColor: '#4db89e',
+                color: '#0e2620',
                 weight: 1.5,
                 opacity: 0.9,
-                fillOpacity: 0.55,
+                fillOpacity: 0.6,
               }}
             >
               <Popup>
-                <strong>{entry.country}</strong><br />{entry.count} prosjekter
+                <strong>{entry.country}</strong>
+                <br />
+                {entry.count} prosjekter
               </Popup>
             </CircleMarker>
           )
