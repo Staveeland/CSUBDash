@@ -1,694 +1,481 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useMemo, useState, useTransition } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import * as XLSX from 'xlsx'
+import { useState, useEffect, useCallback } from 'react'
+import {
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  BarChart, Bar, Legend
+} from 'recharts'
 
-export interface DashboardData {
-  kpis: { totalProjects: number; upcomingCount: number; totalXmts: number; totalSurfKm: number }
-  charts: {
-    facilityDistribution: { name: string; count: number }[]
-    yearlyTrend: { year: number; xmts: number }[]
-    continentDistribution: { name: string; count: number }[]
-  }
-  companies: {
-    contractors: { name: string; projectCount: number }[]
-    operators: { name: string; projectCount: number }[]
-  }
-  upcomingAwards: DashboardUpcomingAward[]
-  projects: DashboardProject[]
-}
-
-interface DashboardUpcomingAward {
-  id?: string
-  year: number | null
-  country: string | null
-  development_project: string | null
-  operator: string | null
-  surf_contractor: string | null
-  water_depth_category: string | null
-}
-
-interface DashboardProject {
-  id?: string
-  development_project: string | null
-  asset?: string | null
-  country: string | null
-  continent?: string | null
-  operator: string | null
-  surf_contractor: string | null
-  facility_category?: string | null
-  water_depth_category: string | null
-  xmt_count: number | null
-  surf_km: number | null
-  subsea_unit_count?: number | null
-  first_year?: number | null
-  last_year?: number | null
-}
-
-const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
-
-function DonutChart({ data, size = 180 }: { data: { name: string; count: number }[]; size?: number }) {
-  const total = data.reduce((s, d) => s + d.count, 0)
-  if (total === 0) return <div className="text-slate-500 text-sm">Ingen data</div>
-  const r = size / 2 - 10
-  const cx = size / 2
-  const cy = size / 2
-
-  const angles = data.map((d) => (d.count / total) * 2 * Math.PI)
-  const angleEnds = angles.reduce<number[]>(
-    (arr, angle, index) => [...arr, (index === 0 ? -Math.PI / 2 : arr[index - 1]) + angle],
-    []
-  )
-
-  const slices = data.map((d, i) => {
-    const startAngle = i === 0 ? -Math.PI / 2 : angleEnds[i - 1]
-    const endAngle = angleEnds[i]
-    const startX = cx + r * Math.cos(startAngle)
-    const startY = cy + r * Math.sin(startAngle)
-    const endX = cx + r * Math.cos(endAngle)
-    const endY = cy + r * Math.sin(endAngle)
-    const angle = angles[i]
-    const large = angle > Math.PI ? 1 : 0
-    return (
-      <path
-        key={`${d.name}-${i}`}
-        d={`M ${cx} ${cy} L ${startX} ${startY} A ${r} ${r} 0 ${large} 1 ${endX} ${endY} Z`}
-        fill={COLORS[i % COLORS.length]}
-        stroke="#1e293b"
-        strokeWidth="2"
-      />
-    )
-  })
-
-  return (
-    <div className="flex items-center gap-4">
-      <svg width={size} height={size}>
-        {slices}
-        <circle cx={cx} cy={cy} r={r * 0.55} fill="#1e293b" />
-      </svg>
-      <div className="text-xs space-y-1">
-        {data.slice(0, 6).map((d, i) => (
-          <div key={`${d.name}-${i}`} className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
-            <span className="text-slate-300 truncate max-w-[140px]">{d.name}</span>
-            <span className="text-slate-500 ml-auto">{d.count}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function BarChart({ data }: { data: { year: number; xmts: number }[] }) {
-  if (data.length === 0) return <div className="text-slate-500 text-sm">Ingen data</div>
-  const max = Math.max(...data.map((d) => d.xmts), 1)
-  const barW = Math.max(12, Math.min(30, 500 / data.length - 4))
-
-  return (
-    <div className="flex items-end gap-1 h-[160px] overflow-x-auto pb-6 relative">
-      {data.map((d) => (
-        <div key={d.year} className="flex flex-col items-center shrink-0" style={{ width: barW }}>
-          <span className="text-[10px] text-slate-400 mb-1">{d.xmts}</span>
-          <div
-            className="rounded-t bg-green-500 w-full transition-all"
-            style={{ height: `${Math.max(2, (d.xmts / max) * 130)}px` }}
-          />
-          <span className="text-[9px] text-slate-500 mt-1 -rotate-45 origin-top-left">{d.year}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-const NAV = [
-  { label: 'Dashboard', icon: '📊', active: true },
-  { label: 'Kontrakter', icon: '📄' },
-  { label: 'Selskaper', icon: '🏢' },
-  { label: 'Import', icon: '📥' },
-  { label: 'Innstillinger', icon: '⚙️' },
-]
-
-function csvCell(value: unknown): string {
-  const text = String(value ?? '')
-  if (/[",\n;]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`
-  }
-  return text
-}
-
-function downloadBlob(filename: string, blob: Blob) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
-function exportCsv(filename: string, rows: Record<string, unknown>[]) {
-  if (rows.length === 0) return
-  const headers = Object.keys(rows[0])
-  const csv = [
-    headers.join(','),
-    ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(',')),
-  ].join('\n')
-
-  downloadBlob(filename, new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
-}
-
-function exportXlsx(filename: string, sheetName: string, rows: Record<string, unknown>[]) {
-  if (rows.length === 0) return
-  const worksheet = XLSX.utils.json_to_sheet(rows)
-  const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName)
-  const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
-
-  downloadBlob(
-    filename,
-    new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    })
-  )
-}
-
-function getProjectKey(project: DashboardProject): string {
-  if (project.id) return String(project.id)
-  return [project.development_project || 'unknown', project.asset || 'unknown', project.country || 'unknown'].join('|')
-}
-
-function SectionFallback({ label }: { label: string }) {
-  return (
-    <div className="bg-slate-800/80 rounded-xl p-5 border border-slate-700/50 text-sm text-slate-500">
-      Laster {label}...
-    </div>
-  )
-}
-
-function KpiSection({ kpis }: { kpis: DashboardData['kpis'] }) {
-  const cards = [
-    { label: 'Totalt antall prosjekter', value: kpis.totalProjects.toLocaleString(), valueClass: 'text-green-400' },
-    { label: 'Upcoming Awards', value: kpis.upcomingCount.toLocaleString(), valueClass: 'text-blue-400' },
-    { label: 'Total XMTs', value: kpis.totalXmts.toLocaleString(), valueClass: 'text-amber-400' },
-    { label: 'Total SURF km', value: kpis.totalSurfKm.toLocaleString(), valueClass: 'text-purple-400' },
-  ]
-
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      {cards.map((kpi) => (
-        <div key={kpi.label} className="bg-slate-800/80 rounded-xl p-5 border border-slate-700/50">
-          <div className="text-slate-400 text-xs mb-2">{kpi.label}</div>
-          <div className={`text-2xl font-bold ${kpi.valueClass}`}>{kpi.value}</div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ChartsSection({ charts }: { charts: DashboardData['charts'] }) {
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <div className="bg-slate-800/80 rounded-xl p-5 border border-slate-700/50">
-        <h3 className="text-sm font-semibold text-slate-300 mb-4">Fasefordeling</h3>
-        <DonutChart data={charts.facilityDistribution} />
-      </div>
-      <div className="bg-slate-800/80 rounded-xl p-5 border border-slate-700/50">
-        <h3 className="text-sm font-semibold text-slate-300 mb-4">Årlig trend (XMTs)</h3>
-        <BarChart data={charts.yearlyTrend} />
-      </div>
-      <div className="bg-slate-800/80 rounded-xl p-5 border border-slate-700/50">
-        <h3 className="text-sm font-semibold text-slate-300 mb-4">Regional fordeling</h3>
-        <DonutChart data={charts.continentDistribution} />
-      </div>
-    </div>
-  )
-}
-
-function CompanySection({
-  companies,
-  filterContractor,
-  filterOperator,
-  onToggleContractor,
-  onToggleOperator,
-}: {
-  companies: DashboardData['companies']
-  filterContractor: string
-  filterOperator: string
-  onToggleContractor: (name: string) => void
-  onToggleOperator: (name: string) => void
-}) {
-  return (
-    <>
-      <section>
-        <h2 className="text-lg font-semibold text-slate-200 mb-3">Installasjonsselskaper (SURF-kontraktører)</h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {companies.contractors.slice(0, 12).map((c) => (
-            <button
-              key={c.name}
-              onClick={() => onToggleContractor(c.name)}
-              className={`bg-slate-800/80 rounded-lg p-4 border-l-4 border-green-600 text-left hover:bg-slate-700/80 transition ${
-                filterContractor === c.name ? 'ring-1 ring-green-500' : ''
-              }`}
-            >
-              <div className="text-sm font-medium text-slate-200 truncate">{c.name}</div>
-              <div className="text-xs text-slate-400 mt-1">{c.projectCount} prosjekter</div>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="text-lg font-semibold text-slate-200 mb-3">Operatørselskaper</h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {companies.operators.slice(0, 12).map((c) => (
-            <button
-              key={c.name}
-              onClick={() => onToggleOperator(c.name)}
-              className={`bg-slate-800/80 rounded-lg p-3 border-l-4 border-green-300 text-left hover:bg-slate-700/80 transition ${
-                filterOperator === c.name ? 'ring-1 ring-green-400' : ''
-              }`}
-            >
-              <div className="text-sm font-medium text-slate-200 truncate">{c.name}</div>
-              <div className="text-xs text-slate-400 mt-1">{c.projectCount} prosjekter</div>
-            </button>
-          ))}
-        </div>
-      </section>
-    </>
-  )
-}
-
-function UpcomingAwardsSection({
-  upcomingAwards,
-  onExportCsv,
-  onExportXlsx,
-}: {
-  upcomingAwards: DashboardUpcomingAward[]
-  onExportCsv: () => void
-  onExportXlsx: () => void
-}) {
-  if (upcomingAwards.length === 0) return null
-
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-lg font-semibold text-slate-200">Upcoming Awards</h2>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={onExportCsv}
-            className="text-xs px-2.5 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700/50"
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={onExportXlsx}
-            className="text-xs px-2.5 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700/50"
-          >
-            Export Excel
-          </button>
-        </div>
-      </div>
-      <div className="bg-slate-800/80 rounded-xl border border-slate-700/50 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-700 text-slate-400 text-xs">
-              <th className="text-left p-3">År</th>
-              <th className="text-left p-3">Land</th>
-              <th className="text-left p-3">Prosjekt</th>
-              <th className="text-left p-3">Operatør</th>
-              <th className="text-left p-3">Kontraktør</th>
-              <th className="text-left p-3">Vanndybde</th>
-            </tr>
-          </thead>
-          <tbody>
-            {upcomingAwards.slice(0, 20).map((award, index) => (
-              <tr key={award.id || index} className="border-b border-slate-700/50 hover:bg-slate-700/30">
-                <td className="p-3 text-slate-300">{award.year ?? '-'}</td>
-                <td className="p-3 text-slate-300">{award.country || '-'}</td>
-                <td className="p-3 text-slate-200">{award.development_project || '-'}</td>
-                <td className="p-3 text-slate-300">{award.operator || '-'}</td>
-                <td className="p-3 text-slate-300">{award.surf_contractor || '-'}</td>
-                <td className="p-3 text-slate-300">{award.water_depth_category || '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function ProjectsSection({
-  projects,
-  totalProjects,
-  selectedProjectKey,
-  onOpenDetails,
-  onExportCsv,
-  onExportXlsx,
-}: {
-  projects: DashboardProject[]
+// ── Types ──────────────────────────────────────────
+interface Stats {
   totalProjects: number
-  selectedProjectKey: string
-  onOpenDetails: (project: DashboardProject) => void
-  onExportCsv: () => void
-  onExportXlsx: () => void
-}) {
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-lg font-semibold text-slate-200">
-          Prosjekter {projects.length !== totalProjects && `(${projects.length} av ${totalProjects})`}
-        </h2>
-        <span className="text-xs text-slate-500">Klikk rad for detaljer</span>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={onExportCsv}
-            className="text-xs px-2.5 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700/50"
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={onExportXlsx}
-            className="text-xs px-2.5 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700/50"
-          >
-            Export Excel
-          </button>
-        </div>
-      </div>
-      <div className="bg-slate-800/80 rounded-xl border border-slate-700/50 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-700 text-slate-400 text-xs">
-              <th className="text-left p-3">Prosjekt</th>
-              <th className="text-left p-3">Land</th>
-              <th className="text-left p-3">Operatør</th>
-              <th className="text-left p-3">Kontraktør</th>
-              <th className="text-right p-3">XMTs</th>
-              <th className="text-right p-3">SURF km</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projects.slice(0, 100).map((project) => {
-              const rowKey = getProjectKey(project)
-              return (
-                <tr
-                  key={rowKey}
-                  onClick={() => onOpenDetails(project)}
-                  className={`border-b border-slate-700/50 hover:bg-slate-700/30 cursor-pointer ${
-                    rowKey === selectedProjectKey ? 'bg-slate-700/40' : ''
-                  }`}
-                >
-                  <td className="p-3 text-slate-200 max-w-[240px] truncate">{project.development_project || '-'}</td>
-                  <td className="p-3 text-slate-300">{project.country || '-'}</td>
-                  <td className="p-3 text-slate-300">{project.operator || '-'}</td>
-                  <td className="p-3 text-slate-300">{project.surf_contractor || '-'}</td>
-                  <td className="p-3 text-right text-green-400 font-mono">{project.xmt_count ?? 0}</td>
-                  <td className="p-3 text-right text-blue-400 font-mono">{project.surf_km ?? 0}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-        {projects.length > 100 && (
-          <div className="p-3 text-center text-slate-500 text-xs">Viser 100 av {projects.length} prosjekter</div>
-        )}
-      </div>
-    </section>
-  )
+  totalSurfKm: number
+  totalXmts: number
+  upcomingAwards: number
+  regionCount: number
 }
 
-export default function Dashboard({ data }: { data: DashboardData }) {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const [searchInput, setSearchInput] = useState(searchParams.get('q') || '')
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [isPending, startTransition] = useTransition()
+interface Charts {
+  byCountry: { country: string; count: number }[]
+  byPhase: { phase: string; count: number }[]
+  byDepth: { depth: string; count: number }[]
+  byYear: { year: number; count: number }[]
+}
 
-  const search = searchParams.get('q') || ''
-  const filterContractor = searchParams.get('contractor') || ''
-  const filterOperator = searchParams.get('operator') || ''
-  const selectedProjectKey = searchParams.get('project') || ''
+interface Companies {
+  contractors: { name: string; count: number }[]
+  operators: { name: string; count: number }[]
+}
 
-  const setQueryParams = useCallback((updates: Record<string, string | null>) => {
-    const params = new URLSearchParams(searchParams.toString())
-    let changed = false
+interface Project {
+  development_project: string
+  asset: string
+  country: string
+  continent: string
+  operator: string
+  surf_contractor: string
+  facility_category: string
+  water_depth_category: string
+  xmt_count: number
+  surf_km: number
+  first_year: number
+  last_year: number
+  [key: string]: unknown
+}
 
-    for (const [key, value] of Object.entries(updates)) {
-      const current = params.get(key)
-      if (!value) {
-        if (current !== null) {
-          params.delete(key)
-          changed = true
-        }
-      } else if (current !== value) {
-        params.set(key, value)
-        changed = true
-      }
+// ── Colors ─────────────────────────────────────────
+const GREENS = ['#0e2620','#1a3c34','#245a4e','#2d7368','#38917f','#4db89e','#7dd4bf','#b5e8d9']
+const DONUT_COLORS = ['#1a3c34','#38917f','#7dd4bf','#c9a84c','#e8d48b','#b5e8d9','#245a4e','#2d7368']
+
+// ── Helpers ────────────────────────────────────────
+function LoadingPlaceholder({ text = 'Laster...' }: { text?: string }) {
+  return <div className="text-center py-5 text-[var(--text-secondary)] text-sm" style={{ animation: 'pulse-loading 1.5s ease-in-out infinite' }}>{text}</div>
+}
+
+// ── Main Component ─────────────────────────────────
+export default function Dashboard() {
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [charts, setCharts] = useState<Charts | null>(null)
+  const [companies, setCompanies] = useState<Companies | null>(null)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [lang, setLang] = useState<'no' | 'en'>('no')
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [s, c, co, p] = await Promise.all([
+        fetch('/api/dashboard/stats').then(r => r.ok ? r.json() : null),
+        fetch('/api/dashboard/charts').then(r => r.ok ? r.json() : null),
+        fetch('/api/dashboard/companies').then(r => r.ok ? r.json() : null),
+        fetch('/api/dashboard/projects').then(r => r.ok ? r.json() : null),
+      ])
+      if (s) setStats(s)
+      if (c) setCharts(c)
+      if (co) setCompanies(co)
+      if (Array.isArray(p)) setProjects(p)
+    } catch (e) {
+      console.error('Failed to load dashboard data:', e)
+    } finally {
+      setLoading(false)
     }
+  }, [])
 
-    if (!changed) return
+  useEffect(() => { fetchData() }, [fetchData])
 
-    const nextQuery = params.toString()
-    const nextPath = nextQuery ? `${pathname}?${nextQuery}` : pathname
+  const filteredProjects = searchQuery
+    ? projects.filter(p => Object.values(p).some(v => String(v).toLowerCase().includes(searchQuery.toLowerCase())))
+    : projects
 
-    startTransition(() => {
-      router.replace(nextPath, { scroll: false })
-    })
-  }, [pathname, router, searchParams])
-
-  useEffect(() => {
-    setSearchInput(search)
-  }, [search])
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      if (searchInput !== search) {
-        setQueryParams({ q: searchInput, project: null })
-      }
-    }, 250)
-
-    return () => window.clearTimeout(timeout)
-  }, [searchInput, search, setQueryParams])
-
-  const filteredProjects = useMemo(() => {
-    const needle = search.toLowerCase()
-
-    return data.projects.filter((project) => {
-      if (filterContractor && project.surf_contractor !== filterContractor) return false
-      if (filterOperator && project.operator !== filterOperator) return false
-      if (needle) {
-        return (
-          (project.development_project || '').toLowerCase().includes(needle) ||
-          (project.operator || '').toLowerCase().includes(needle) ||
-          (project.country || '').toLowerCase().includes(needle) ||
-          (project.surf_contractor || '').toLowerCase().includes(needle)
-        )
-      }
-      return true
-    })
-  }, [data.projects, search, filterContractor, filterOperator])
-
-  const selectedProject = useMemo(() => {
-    if (!selectedProjectKey) return null
-    return data.projects.find((project) => getProjectKey(project) === selectedProjectKey) || null
-  }, [data.projects, selectedProjectKey])
-
-  const clearFilters = useCallback(() => {
-    setQueryParams({ q: null, contractor: null, operator: null, project: null })
-  }, [setQueryParams])
-
-  const toggleContractor = useCallback((name: string) => {
-    setQueryParams({ contractor: filterContractor === name ? null : name, project: null })
-  }, [filterContractor, setQueryParams])
-
-  const toggleOperator = useCallback((name: string) => {
-    setQueryParams({ operator: filterOperator === name ? null : name, project: null })
-  }, [filterOperator, setQueryParams])
-
-  const openProjectDetails = useCallback((project: DashboardProject) => {
-    setQueryParams({ project: getProjectKey(project) })
-  }, [setQueryParams])
-
-  const closeProjectDetails = useCallback(() => {
-    setQueryParams({ project: null })
-  }, [setQueryParams])
-
-  const timestamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
-
-  const upcomingExportRows = useMemo(() => (
-    data.upcomingAwards.map((award) => ({
-      year: award.year,
-      country: award.country,
-      development_project: award.development_project,
-      operator: award.operator,
-      surf_contractor: award.surf_contractor,
-      water_depth_category: award.water_depth_category,
-    }))
-  ), [data.upcomingAwards])
-
-  const projectExportRows = useMemo(() => (
-    filteredProjects.map((project) => ({
-      development_project: project.development_project,
-      asset: project.asset || '',
-      country: project.country,
-      operator: project.operator,
-      surf_contractor: project.surf_contractor,
-      facility_category: project.facility_category || '',
-      water_depth_category: project.water_depth_category,
-      first_year: project.first_year ?? '',
-      last_year: project.last_year ?? '',
-      xmt_count: project.xmt_count ?? 0,
-      surf_km: project.surf_km ?? 0,
-      subsea_unit_count: project.subsea_unit_count ?? 0,
-    }))
-  ), [filteredProjects])
+  const openDrawer = (p: Project) => { setSelectedProject(p); setDrawerOpen(true) }
+  const closeDrawer = () => { setDrawerOpen(false); setTimeout(() => setSelectedProject(null), 300) }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <aside className={`${sidebarOpen ? 'w-56' : 'w-0'} bg-slate-900 border-r border-slate-800 transition-all duration-200 overflow-hidden shrink-0`}>
-        <div className="p-4">
-          <div className="text-green-500 font-bold text-lg mb-1">CSUB</div>
-          <div className="text-slate-500 text-xs mb-6">Sales Intelligence</div>
-          <nav className="space-y-1">
-            {NAV.map((item) => (
-              <a
-                key={item.label}
-                href="#"
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
-                  item.active ? 'bg-slate-800 text-green-400' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-300'
-                }`}
-              >
-                <span>{item.icon}</span>
-                {item.label}
-              </a>
-            ))}
-          </nav>
+    <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
+      {/* ── HEADER ── */}
+      <header className="sticky top-0 z-50 flex items-center justify-between px-8 h-16" style={{ background: 'linear-gradient(135deg, #0e2620, #1a3c34)', boxShadow: '0 2px 12px rgba(0,0,0,.2)' }}>
+        <div className="flex items-center gap-5">
+          <span className="text-[28px] font-bold tracking-widest" style={{ fontFamily: 'Source Serif 4, serif', color: '#c9a84c' }}>CSUB</span>
+          <span className="text-[13px] font-light tracking-wide pl-4" style={{ color: '#7dd4bf', borderLeft: '1px solid #245a4e' }}>Sales Intelligence Platform</span>
         </div>
-      </aside>
+        <div className="flex items-center gap-4">
+          <div className="flex rounded-full overflow-hidden" style={{ background: '#245a4e' }}>
+            <button onClick={() => setLang('no')} className={`px-3.5 py-1 text-xs font-semibold border-none cursor-pointer transition-colors ${lang === 'no' ? 'text-white' : ''}`} style={lang === 'no' ? { background: '#38917f' } : { background: 'transparent', color: '#7dd4bf' }}>NO</button>
+            <button onClick={() => setLang('en')} className={`px-3.5 py-1 text-xs font-semibold border-none cursor-pointer transition-colors ${lang === 'en' ? 'text-white' : ''}`} style={lang === 'en' ? { background: '#38917f' } : { background: 'transparent', color: '#7dd4bf' }}>EN</button>
+          </div>
+          <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full text-[13px] text-white" style={{ background: '#245a4e' }}>
+            <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs" style={{ background: '#c9a84c', color: '#0e2620' }}>HR</div>
+            <span>Helge Rasmussen</span>
+          </div>
+        </div>
+      </header>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4 shrink-0">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-slate-400 hover:text-slate-200">☰</button>
-          <h1 className="text-sm font-semibold text-slate-200">CSUB Sales Intelligence Platform</h1>
-          <div className="flex-1" />
-          {isPending && <span className="text-[11px] text-slate-500">Oppdaterer...</span>}
+      {/* ── SEARCH ── */}
+      <div className="pt-5 px-8">
+        <div className="relative max-w-[800px]">
+          <span className="absolute left-[18px] top-1/2 -translate-y-1/2 text-[18px]" style={{ color: '#2d7368' }}>🔍</span>
           <input
             type="text"
-            placeholder="Søk prosjekter, selskaper..."
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 w-72 focus:outline-none focus:border-green-500"
+            placeholder="Søk i kontrakter, prosjekter, nyheter..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full py-3.5 pl-[52px] pr-20 rounded-full text-[15px] bg-white transition-all"
+            style={{ border: '2px solid var(--border)', fontFamily: 'Source Sans 3, sans-serif', boxShadow: 'var(--shadow)' }}
           />
-        </header>
-
-        <main className="flex-1 overflow-y-auto p-6 space-y-6">
-          {(filterContractor || filterOperator) && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-slate-400">Filter:</span>
-              {filterContractor && (
-                <span className="bg-green-600/20 text-green-400 px-2 py-0.5 rounded text-xs">Kontraktør: {filterContractor}</span>
-              )}
-              {filterOperator && (
-                <span className="bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded text-xs">Operatør: {filterOperator}</span>
-              )}
-              <button onClick={clearFilters} className="text-slate-500 hover:text-slate-300 text-xs ml-2">✕ Fjern filter</button>
-            </div>
-          )}
-
-          <Suspense fallback={<SectionFallback label="nøkkeltall" />}>
-            <KpiSection kpis={data.kpis} />
-          </Suspense>
-
-          <Suspense fallback={<SectionFallback label="visualiseringer" />}>
-            <ChartsSection charts={data.charts} />
-          </Suspense>
-
-          <Suspense fallback={<SectionFallback label="selskap" />}>
-            <CompanySection
-              companies={data.companies}
-              filterContractor={filterContractor}
-              filterOperator={filterOperator}
-              onToggleContractor={toggleContractor}
-              onToggleOperator={toggleOperator}
-            />
-          </Suspense>
-
-          <Suspense fallback={<SectionFallback label="upcoming awards" />}>
-            <UpcomingAwardsSection
-              upcomingAwards={data.upcomingAwards}
-              onExportCsv={() => exportCsv(`upcoming-awards-${timestamp}.csv`, upcomingExportRows)}
-              onExportXlsx={() => exportXlsx(`upcoming-awards-${timestamp}.xlsx`, 'UpcomingAwards', upcomingExportRows)}
-            />
-          </Suspense>
-
-          <Suspense fallback={<SectionFallback label="prosjektliste" />}>
-            <ProjectsSection
-              projects={filteredProjects}
-              totalProjects={data.projects.length}
-              selectedProjectKey={selectedProjectKey}
-              onOpenDetails={openProjectDetails}
-              onExportCsv={() => exportCsv(`projects-${timestamp}.csv`, projectExportRows)}
-              onExportXlsx={() => exportXlsx(`projects-${timestamp}.xlsx`, 'Projects', projectExportRows)}
-            />
-          </Suspense>
-        </main>
+          <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white px-3 py-1 rounded-full text-[11px] font-semibold tracking-wide" style={{ background: 'linear-gradient(135deg, #2d7368, #4db89e)' }}>✨ AI-søk</span>
+        </div>
       </div>
 
-      <div
-        onClick={closeProjectDetails}
-        className={`fixed inset-0 z-40 bg-slate-950/60 transition-opacity ${
-          selectedProject ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-      />
-
-      <aside
-        className={`fixed right-0 top-0 z-50 h-full w-full max-w-md bg-slate-900 border-l border-slate-700 transform transition-transform duration-300 ${
-          selectedProject ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
-        <div className="h-14 border-b border-slate-700 px-4 flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-slate-100">Prosjektdetaljer</h3>
-          <div className="ml-auto" />
-          <button onClick={closeProjectDetails} className="text-slate-400 hover:text-slate-200 text-lg leading-none">✕</button>
+      <main className="px-8 pt-5 pb-10">
+        {/* ── KPI CARDS ── */}
+        <div className="grid grid-cols-5 gap-4 mb-5 max-[1024px]:grid-cols-3 max-[768px]:grid-cols-1">
+          {[
+            { label: 'Aktive kontrakter', value: stats?.totalProjects },
+            { label: 'Total SURF km', value: stats?.totalSurfKm ? `${stats.totalSurfKm} km` : undefined },
+            { label: 'Nye siste 30d', value: stats?.upcomingAwards },
+            { label: 'Totale XMTs', value: stats?.totalXmts },
+            { label: 'Regioner', value: stats?.regionCount },
+          ].map((kpi, i) => (
+            <div key={i} className="relative overflow-hidden rounded-xl bg-white p-5 transition-all hover:-translate-y-0.5 cursor-default" style={{ boxShadow: 'var(--shadow)', animation: `fadeInUp .5s ease forwards`, animationDelay: `${i * 0.05}s` }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: 'linear-gradient(90deg, #2d7368, #4db89e)' }} />
+              <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{kpi.label}</div>
+              <div className="mono text-[32px] font-medium" style={{ color: '#1a3c34' }}>{loading ? '—' : (kpi.value ?? '—')}</div>
+            </div>
+          ))}
         </div>
 
-        <div className="p-4 space-y-4 overflow-y-auto h-[calc(100%-56px)]">
-          {selectedProject ? (
-            <>
-              <div>
-                <h4 className="text-base font-semibold text-slate-100 mb-1">{selectedProject.development_project || '-'}</h4>
-                <p className="text-xs text-slate-400">{selectedProject.asset || 'Asset ikke oppgitt'}</p>
+        {/* ── PIPELINE ── */}
+        <Card title="Salgspipeline" icon="📊" className="mb-5">
+          <div className="flex items-center gap-0">
+            {['FEED','Bud på bud','Tildeling','CSUB direkte kontakt','CSUB Contract Award'].map((label, i) => (
+              <div key={label} className="contents">
+                {i > 0 && <div className="w-6 text-center text-lg shrink-0" style={{ color: '#4db89e' }}>→</div>}
+                <div className={`flex-1 text-center py-4 px-2 transition-colors hover:bg-green-200/40 cursor-default ${i === 0 ? 'rounded-l-lg' : ''} ${i === 4 ? 'rounded-r-lg' : ''}`} style={{ background: i % 2 === 0 ? '#f0faf6' : '#e0f5ef' }}>
+                  <div className="mono text-[28px] font-medium" style={{ color: '#1a3c34' }}>
+                    {loading ? '...' : (i === 0 ? filteredProjects.length : '—')}
+                  </div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide mt-1" style={{ color: 'var(--text-secondary)' }}>{label}</div>
+                  <div className="h-1 rounded-sm mt-2" style={{ background: '#b5e8d9' }}>
+                    <div className="h-full rounded-sm transition-all duration-700" style={{ background: 'linear-gradient(90deg, #2d7368, #4db89e)', width: i === 0 ? '100%' : '0%' }} />
+                  </div>
+                </div>
               </div>
+            ))}
+          </div>
+        </Card>
 
-              <div className="bg-slate-800/80 rounded-lg border border-slate-700/50 divide-y divide-slate-700/60">
-                {[
-                  { label: 'Land', value: selectedProject.country || '-' },
-                  { label: 'Kontinent', value: selectedProject.continent || '-' },
-                  { label: 'Operatør', value: selectedProject.operator || '-' },
-                  { label: 'Kontraktør', value: selectedProject.surf_contractor || '-' },
-                  { label: 'Fasilitetskategori', value: selectedProject.facility_category || '-' },
-                  { label: 'Vanndybde', value: selectedProject.water_depth_category || '-' },
-                  { label: 'Første år', value: selectedProject.first_year ?? '-' },
-                  { label: 'Siste år', value: selectedProject.last_year ?? '-' },
-                  { label: 'XMTs', value: selectedProject.xmt_count ?? 0 },
-                  { label: 'SURF km', value: selectedProject.surf_km ?? 0 },
-                  { label: 'Subsea units', value: selectedProject.subsea_unit_count ?? 0 },
-                ].map((row) => (
-                  <div key={row.label} className="flex items-center gap-3 p-3 text-sm">
-                    <span className="text-slate-400">{row.label}</span>
-                    <span className="ml-auto text-slate-200 font-medium text-right">{row.value}</span>
+        {/* ── VISUAL OVERVIEW ── */}
+        <div className="grid grid-cols-3 gap-5 mb-5 max-[1024px]:grid-cols-2 max-[768px]:grid-cols-1">
+          {/* Phase donut */}
+          <Card title="Kontrakter etter fase" icon="🎯">
+            {!charts ? <LoadingPlaceholder /> : (
+              <div className="flex items-center gap-4">
+                <div className="w-[160px] h-[160px] shrink-0">
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie data={charts.byPhase.slice(0, 6)} dataKey="count" nameKey="phase" cx="50%" cy="50%" innerRadius={35} outerRadius={60} strokeWidth={0}>
+                        {charts.byPhase.slice(0, 6).map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {charts.byPhase.slice(0, 6).map((item, i) => (
+                    <div key={item.phase} className="flex items-center gap-2 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
+                      <span className="truncate max-w-[100px]">{item.phase}</span>
+                      <span className="mono font-semibold ml-auto pl-2">{item.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Regional donut */}
+          <Card title="Regional fordeling" icon="🌍">
+            {!charts ? <LoadingPlaceholder /> : (
+              <div className="flex items-center gap-4">
+                <div className="w-[160px] h-[160px] shrink-0">
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie data={charts.byCountry.slice(0, 6)} dataKey="count" nameKey="country" cx="50%" cy="50%" innerRadius={35} outerRadius={60} strokeWidth={0}>
+                        {charts.byCountry.slice(0, 6).map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {charts.byCountry.slice(0, 6).map((item, i) => (
+                    <div key={item.country} className="flex items-center gap-2 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
+                      <span className="truncate max-w-[100px]">{item.country}</span>
+                      <span className="mono font-semibold ml-auto pl-2">{item.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Trend chart */}
+          <Card title="Kontrakttrend" icon="📈">
+            {!charts ? <LoadingPlaceholder /> : (
+              <div className="h-[160px]">
+                <ResponsiveContainer>
+                  <AreaChart data={charts.byYear}>
+                    <defs>
+                      <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#4db89e" stopOpacity={0.4} />
+                        <stop offset="100%" stopColor="#4db89e" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e3" />
+                    <XAxis dataKey="year" tick={{ fontSize: 10, fill: '#5a6b65' }} />
+                    <YAxis tick={{ fontSize: 10, fill: '#5a6b65' }} />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="count" stroke="#2d7368" fill="url(#trendGrad)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* ── COMPANY SECTIONS ── */}
+        {/* Installasjonsselskaper */}
+        <div className="bg-white rounded-xl mb-5 p-6" style={{ boxShadow: 'var(--shadow)', border: '2px solid #b5e8d9', borderTop: '4px solid #2d7368' }}>
+          <div className="flex items-center gap-2.5 mb-3.5">
+            <span className="text-[22px]">🔧</span>
+            <h3 className="text-[16px]" style={{ color: '#1a3c34' }}>Installasjonsselskaper</h3>
+            <span className="text-xs italic" style={{ color: 'var(--text-secondary)' }}>— CSUB sine kunder</span>
+            <span className="ml-auto text-[10px] px-2.5 py-0.5 rounded-xl font-semibold uppercase tracking-wide" style={{ background: '#e0f5ef', color: '#245a4e' }}>
+              {companies?.contractors?.length || 0} selskaper
+            </span>
+          </div>
+          {!companies ? <LoadingPlaceholder /> : (
+            <div className="grid grid-cols-4 gap-3 max-[1024px]:grid-cols-2 max-[768px]:grid-cols-1">
+              {companies.contractors.slice(0, 8).map(c => {
+                const maxCount = Math.max(...companies.contractors.map(x => x.count), 1)
+                return (
+                  <div key={c.name} className="rounded-lg p-4 flex flex-col items-center text-center transition-all hover:-translate-y-0.5 cursor-default" style={{ background: 'linear-gradient(135deg, #f0faf6, #fff)', border: '2px solid #b5e8d9', boxShadow: 'var(--shadow)' }}>
+                    <div className="text-sm font-bold" style={{ color: '#1a3c34' }}>{c.name}</div>
+                    <div className="mono text-[22px] font-semibold" style={{ color: '#245a4e' }}>{c.count}</div>
+                    <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>kontrakter</div>
+                    <div className="w-full h-1 rounded-sm mt-2" style={{ background: '#e0f5ef' }}>
+                      <div className="h-full rounded-sm" style={{ background: 'linear-gradient(90deg, #2d7368, #4db89e)', width: `${(c.count / maxCount * 100).toFixed(0)}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* FEED + Operators row */}
+        <div className="grid grid-cols-2 gap-5 mb-5 max-[768px]:grid-cols-1">
+          <Card title="" className="!p-6">
+            <div className="flex items-center gap-2.5 mb-3.5">
+              <span className="text-[18px]">📐</span>
+              <h3 className="text-[15px]" style={{ color: '#1a3c34' }}>FEED-selskaper</h3>
+              <span className="text-xs italic" style={{ color: 'var(--text-secondary)' }}>— fremtidige kunder</span>
+            </div>
+            {!companies ? <LoadingPlaceholder /> : (
+              <div className="grid grid-cols-2 gap-3 max-[768px]:grid-cols-1">
+                {companies.contractors.slice(0, 4).map(c => (
+                  <div key={c.name} className="rounded-lg p-3 flex flex-col items-center text-center transition-all hover:-translate-y-0.5 bg-white cursor-default" style={{ border: '1.5px solid var(--border)' }}>
+                    <div className="text-[13px] font-semibold" style={{ color: '#245a4e' }}>{c.name}</div>
+                    <div className="mono text-[18px] font-semibold" style={{ color: '#2d7368' }}>{c.count}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>kontrakter</div>
                   </div>
                 ))}
               </div>
-            </>
-          ) : (
-            <div className="text-sm text-slate-500">Velg et prosjekt i tabellen for å se detaljer.</div>
-          )}
+            )}
+          </Card>
+
+          <div className="rounded-xl p-6" style={{ background: '#f0faf6', boxShadow: 'var(--shadow)' }}>
+            <div className="flex items-center gap-2.5 mb-3.5">
+              <span className="text-[16px]">🏭</span>
+              <h3 className="text-[14px]" style={{ color: 'var(--text-secondary)', fontFamily: 'Source Serif 4, serif' }}>Operatørselskaper</h3>
+              <span className="text-xs italic" style={{ color: 'var(--text-secondary)' }}>— bakgrunnsinformasjon</span>
+            </div>
+            {!companies ? <LoadingPlaceholder /> : (
+              <div className="grid grid-cols-3 gap-3 max-[768px]:grid-cols-1">
+                {companies.operators.slice(0, 9).map(o => (
+                  <div key={o.name} className="rounded-lg px-3 py-2.5 flex justify-between items-center cursor-default" style={{ background: '#f0faf6', border: '1px solid var(--border)' }}>
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{o.name}</span>
+                    <span className="mono text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{o.count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </aside>
+
+        {/* ── PROJECT TABLE ── */}
+        <Card title="Kontraktoversikt" icon="📋" className="mb-5">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[13px]">
+              <thead>
+                <tr>
+                  {['Prosjekt','Land','Operatør','SURF Contractor','Vanndybde','XMTs','SURF km'].map(h => (
+                    <th key={h} className="text-left px-3 py-2.5 text-[11px] uppercase tracking-wider font-bold whitespace-nowrap cursor-pointer hover:text-green-700" style={{ color: 'var(--text-secondary)', borderBottom: '2px solid var(--border)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={7}><LoadingPlaceholder /></td></tr>
+                ) : filteredProjects.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-6" style={{ color: 'var(--text-secondary)' }}>Ingen data</td></tr>
+                ) : (
+                  filteredProjects.slice(0, 50).map((p, i) => (
+                    <tr key={i} onClick={() => openDrawer(p)} className="cursor-pointer transition-colors hover:bg-green-50/60" style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td className="px-3 py-2.5 font-semibold">{p.development_project || '—'}</td>
+                      <td className="px-3 py-2.5">{p.country || '—'}</td>
+                      <td className="px-3 py-2.5">{p.operator || '—'}</td>
+                      <td className="px-3 py-2.5">{p.surf_contractor || '—'}</td>
+                      <td className="px-3 py-2.5 mono">{p.water_depth_category || '—'}</td>
+                      <td className="px-3 py-2.5 mono">{p.xmt_count || 0}</td>
+                      <td className="px-3 py-2.5 mono">{p.surf_km ? Math.round(p.surf_km) : 0}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2 mt-3 px-4 py-2.5 rounded-lg text-xs" style={{ background: '#f0faf6', borderLeft: '3px solid #c9a84c', color: 'var(--text-secondary)' }}>
+            <span>🤖</span> AI-vurdering, verifiser selv — relevansscorer er beregnet av maskinlæring og kan inneholde feil.
+          </div>
+        </Card>
+
+        {/* ── DEPTH + YEAR CHARTS ── */}
+        <div className="grid grid-cols-2 gap-5 mb-5 max-[768px]:grid-cols-1">
+          <Card title="Vanndybde-fordeling" icon="🌊">
+            {!charts ? <LoadingPlaceholder /> : (
+              <div className="h-[200px]">
+                <ResponsiveContainer>
+                  <BarChart data={charts.byDepth.slice(0, 10)}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e3" />
+                    <XAxis dataKey="depth" tick={{ fontSize: 9, fill: '#5a6b65' }} angle={-45} textAnchor="end" height={60} />
+                    <YAxis tick={{ fontSize: 10, fill: '#5a6b65' }} />
+                    <Tooltip />
+                    <Bar dataKey="count" radius={[4,4,0,0]}>
+                      {charts.byDepth.slice(0, 10).map((_, i) => <Cell key={i} fill={GREENS[i % GREENS.length]} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
+
+          <Card title="Prosjekter per år" icon="📅">
+            {!charts ? <LoadingPlaceholder /> : (
+              <div className="h-[200px]">
+                <ResponsiveContainer>
+                  <BarChart data={charts.byYear}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e0e5e3" />
+                    <XAxis dataKey="year" tick={{ fontSize: 10, fill: '#5a6b65' }} />
+                    <YAxis tick={{ fontSize: 10, fill: '#5a6b65' }} />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#2d7368" radius={[4,4,0,0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* ── DOCUMENT UPLOAD ── */}
+        <Card title="Dokumentopplasting" icon="📄" className="mb-5">
+          <DropZone />
+        </Card>
+
+      </main>
+
+      {/* ── DRAWER ── */}
+      {drawerOpen && <div className="fixed inset-0 bg-black/40 z-[200] transition-opacity" onClick={closeDrawer} />}
+      <div className={`fixed top-0 right-0 bottom-0 w-[520px] max-w-[90vw] bg-white z-[201] transition-transform duration-300 overflow-y-auto ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`} style={{ boxShadow: '-8px 0 32px rgba(0,0,0,.15)' }}>
+        {selectedProject && (
+          <>
+            <div className="sticky top-0 z-10 p-5 text-white flex justify-between items-start" style={{ background: 'linear-gradient(135deg, #0e2620, #1a3c34)' }}>
+              <div>
+                <h3 className="text-lg font-semibold mb-1">{selectedProject.development_project}</h3>
+                <div className="text-xs opacity-70">{selectedProject.surf_contractor} → {selectedProject.operator}</div>
+              </div>
+              <button onClick={closeDrawer} className="text-white text-2xl px-2 py-1 rounded hover:bg-white/15 cursor-pointer border-none bg-transparent">×</button>
+            </div>
+            <div className="p-6">
+              <DrawerSection title="Kontraktdetaljer">
+                <DrawerRow label="Land" value={selectedProject.country} />
+                <DrawerRow label="Kontinent" value={selectedProject.continent} />
+                <DrawerRow label="Operatør" value={selectedProject.operator} />
+                <DrawerRow label="SURF Contractor" value={selectedProject.surf_contractor} />
+                <DrawerRow label="Kategori" value={selectedProject.facility_category} />
+                <DrawerRow label="Vanndybde" value={selectedProject.water_depth_category} />
+                <DrawerRow label="XMTs" value={String(selectedProject.xmt_count || 0)} />
+                <DrawerRow label="SURF km" value={String(selectedProject.surf_km ? Math.round(selectedProject.surf_km) : 0)} />
+                <DrawerRow label="Periode" value={`${selectedProject.first_year || '?'} – ${selectedProject.last_year || '?'}`} />
+              </DrawerSection>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Sub-components ─────────────────────────────────
+function Card({ title, icon, children, className = '' }: { title: string; icon?: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`bg-white rounded-xl p-6 transition-shadow hover:shadow-lg ${className}`} style={{ boxShadow: 'var(--shadow)' }}>
+      {title && (
+        <div className="flex items-center justify-between mb-4 text-[13px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+          {title} {icon && <span className="text-[16px]">{icon}</span>}
+        </div>
+      )}
+      {children}
+    </div>
+  )
+}
+
+function DrawerSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-5">
+      <h4 className="text-[13px] uppercase tracking-wider font-bold mb-2.5" style={{ color: 'var(--text-secondary)', fontFamily: 'Source Sans 3, sans-serif' }}>{title}</h4>
+      {children}
+    </div>
+  )
+}
+
+function DrawerRow({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="flex justify-between py-1.5 text-[13px]" style={{ borderBottom: '1px solid var(--border)' }}>
+      <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
+      <span className="font-semibold">{value || '—'}</span>
+    </div>
+  )
+}
+
+function DropZone() {
+  const [dropped, setDropped] = useState(false)
+
+  return (
+    <div
+      className="rounded-xl p-10 text-center cursor-pointer transition-colors flex flex-col items-center justify-center"
+      style={{ border: '2px dashed #7dd4bf', background: '#f0faf6', color: 'var(--text-secondary)' }}
+      onDragOver={e => { e.preventDefault(); (e.currentTarget as HTMLElement).style.borderColor = '#38917f'; (e.currentTarget as HTMLElement).style.background = '#e0f5ef' }}
+      onDragLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#7dd4bf'; (e.currentTarget as HTMLElement).style.background = '#f0faf6' }}
+      onDrop={e => { e.preventDefault(); setDropped(true) }}
+    >
+      <div className="text-[40px] mb-2">{dropped ? '✅' : '📎'}</div>
+      <div className="text-sm font-semibold">{dropped ? 'Dokument mottatt!' : 'Slipp dokumenter eller skjermbilder her'}</div>
+      <div className="text-xs mt-1">{dropped ? 'AI-analyse starter...' : 'AI analyserer og kobler til relevante kontrakter'}</div>
     </div>
   )
 }
