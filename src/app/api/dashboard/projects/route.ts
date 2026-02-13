@@ -19,12 +19,12 @@ export async function GET() {
         .from('projects')
         .select('*')
         .order('first_year', { ascending: false })
-        .limit(600),
+        .limit(5000),
       supabase
         .from('contracts')
         .select('*')
         .order('award_date', { ascending: false })
-        .limit(600),
+        .limit(5000),
     ])
 
     if (projectsRes.error) throw projectsRes.error
