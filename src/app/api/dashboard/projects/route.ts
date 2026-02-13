@@ -18,19 +18,25 @@ export async function GET() {
       supabase
         .from('projects')
         .select('*')
-        .order('first_year', { ascending: false })
         .limit(5000),
       supabase
         .from('contracts')
         .select('*')
-        .order('award_date', { ascending: false })
         .limit(5000),
     ])
 
-    if (projectsRes.error) throw projectsRes.error
-    if (contractsRes.error) throw contractsRes.error
+    if (projectsRes.error) {
+      console.error('projects query failed:', projectsRes.error)
+    }
+    if (contractsRes.error) {
+      console.error('contracts query failed:', contractsRes.error)
+    }
 
-    const projects = (projectsRes.data || []).map((project) => {
+    if (projectsRes.error && contractsRes.error) {
+      throw new Error(`Both dashboard queries failed: projects=${projectsRes.error.message} contracts=${contractsRes.error.message}`)
+    }
+
+    const projects = (projectsRes.error ? [] : projectsRes.data || []).map((project) => {
       const firstYear = project.first_year || parseYear(project.created_at)
       const lastYear = project.last_year || firstYear
       return {
@@ -41,7 +47,7 @@ export async function GET() {
       }
     })
 
-    const contracts = (contractsRes.data || []).map((contract) => {
+    const contracts = (contractsRes.error ? [] : contractsRes.data || []).map((contract) => {
       const contractYear = parseYear(contract.award_date) || parseYear(contract.created_at)
       const projectName = contract.project_name || contract.title || contract.contract_name || contract.description
 
