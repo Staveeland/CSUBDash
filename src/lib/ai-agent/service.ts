@@ -531,6 +531,23 @@ function sortByScoreAndYear<T>(
     .slice(0, limit)
 }
 
+function applyKeywordFilterWithFallback<T>(
+  rows: T[],
+  keywords: string[],
+  buildHaystack: (row: T) => string
+): { rows: T[]; relaxed: boolean } {
+  if (!keywords.length) {
+    return { rows, relaxed: false }
+  }
+
+  const filtered = rows.filter((row) => keywordScore(buildHaystack(row), keywords) > 0)
+  if (filtered.length > 0) {
+    return { rows: filtered, relaxed: false }
+  }
+
+  return { rows, relaxed: rows.length > 0 }
+}
+
 function sumNumber<T>(rows: T[], getter: (row: T) => number): number {
   return rows.reduce((sum, row) => sum + getter(row), 0)
 }
@@ -706,6 +723,42 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
   const admin = createAdminClient()
   const includeTables = new Set(plan.includeTables)
 
+  let forecastsQuery = admin
+    .from('forecasts')
+    .select('year, metric, value, unit, source')
+    .order('year', { ascending: true })
+    .limit(12000)
+  if (plan.fromYear !== null) forecastsQuery = forecastsQuery.gte('year', plan.fromYear)
+  if (plan.toYear !== null) forecastsQuery = forecastsQuery.lte('year', plan.toYear)
+
+  let awardsQuery = admin
+    .from('upcoming_awards')
+    .select('year, country, development_project, asset, operator, surf_contractor, xmts_awarded')
+    .limit(10000)
+  if (plan.fromYear !== null) awardsQuery = awardsQuery.gte('year', plan.fromYear)
+  if (plan.toYear !== null) awardsQuery = awardsQuery.lte('year', plan.toYear)
+
+  let xmtQuery = admin
+    .from('xmt_data')
+    .select('year, country, development_project, operator, surf_contractor, xmt_count')
+    .limit(12000)
+  if (plan.fromYear !== null) xmtQuery = xmtQuery.gte('year', plan.fromYear)
+  if (plan.toYear !== null) xmtQuery = xmtQuery.lte('year', plan.toYear)
+
+  let surfQuery = admin
+    .from('surf_data')
+    .select('year, country, development_project, operator, surf_contractor, km_surf_lines')
+    .limit(12000)
+  if (plan.fromYear !== null) surfQuery = surfQuery.gte('year', plan.fromYear)
+  if (plan.toYear !== null) surfQuery = surfQuery.lte('year', plan.toYear)
+
+  let subseaQuery = admin
+    .from('subsea_unit_data')
+    .select('year, country, development_project, operator, surf_contractor, unit_count')
+    .limit(12000)
+  if (plan.fromYear !== null) subseaQuery = subseaQuery.gte('year', plan.fromYear)
+  if (plan.toYear !== null) subseaQuery = subseaQuery.lte('year', plan.toYear)
+
   const [projectsRes, contractsRes, forecastsRes, awardsRes, xmtRes, surfRes, subseaRes, docsRes] = await Promise.all([
     includeTables.has('projects')
       ? admin
@@ -720,35 +773,19 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
         .limit(10000)
       : Promise.resolve({ data: [], error: null }),
     includeTables.has('forecasts')
-      ? admin
-        .from('forecasts')
-        .select('year, metric, value, unit, source')
-        .order('year', { ascending: true })
-        .limit(12000)
+      ? forecastsQuery
       : Promise.resolve({ data: [], error: null }),
     includeTables.has('upcoming_awards')
-      ? admin
-        .from('upcoming_awards')
-        .select('year, country, development_project, asset, operator, surf_contractor, xmts_awarded')
-        .limit(10000)
+      ? awardsQuery
       : Promise.resolve({ data: [], error: null }),
     includeTables.has('xmt_data')
-      ? admin
-        .from('xmt_data')
-        .select('year, country, development_project, operator, surf_contractor, xmt_count')
-        .limit(12000)
+      ? xmtQuery
       : Promise.resolve({ data: [], error: null }),
     includeTables.has('surf_data')
-      ? admin
-        .from('surf_data')
-        .select('year, country, development_project, operator, surf_contractor, km_surf_lines')
-        .limit(12000)
+      ? surfQuery
       : Promise.resolve({ data: [], error: null }),
     includeTables.has('subsea_unit_data')
-      ? admin
-        .from('subsea_unit_data')
-        .select('year, country, development_project, operator, surf_contractor, unit_count')
-        .limit(12000)
+      ? subseaQuery
       : Promise.resolve({ data: [], error: null }),
     includeTables.has('documents')
       ? admin
@@ -769,25 +806,28 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
   const docs = normalizeReportRows(extractRows('documents', docsRes, warnings))
 
   const combinedKeywords = uniqStrings([...plan.projectKeywords, ...plan.focusPoints]).map((value) => normalizeText(value))
-  const hasKeywordFilter = combinedKeywords.length > 0
+  const keywordFallbackTables: string[] = []
 
+  const baseProjects = projects.filter((project) => {
+    if (!projectWithinYear(project, plan.fromYear, plan.toYear)) return false
+    if (!matchesOptionalFilters(project.country, project.operator, plan.countries, plan.operators)) return false
+    return true
+  })
+  const projectKeywordFilter = applyKeywordFilterWithFallback(
+    baseProjects,
+    combinedKeywords,
+    (project) => [
+      project.development_project,
+      project.asset,
+      project.country,
+      project.operator,
+      project.surf_contractor,
+      project.facility_category,
+    ].join(' ')
+  )
+  if (projectKeywordFilter.relaxed) keywordFallbackTables.push('projects')
   const filteredProjects = sortByScoreAndYear(
-    projects.filter((project) => {
-      if (!projectWithinYear(project, plan.fromYear, plan.toYear)) return false
-      if (!matchesOptionalFilters(project.country, project.operator, plan.countries, plan.operators)) return false
-      if (!hasKeywordFilter) return true
-
-      const haystack = [
-        project.development_project,
-        project.asset,
-        project.country,
-        project.operator,
-        project.surf_contractor,
-        project.facility_category,
-      ].join(' ')
-
-      return keywordScore(haystack, combinedKeywords) > 0
-    }),
+    projectKeywordFilter.rows,
     (project) => keywordScore([
       project.development_project,
       project.asset,
@@ -799,24 +839,27 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
     480
   )
 
+  const baseContracts = contracts.filter((contract) => {
+    const contractYear = yearFromDate(contract.date) ?? yearFromDate(contract.announced_at)
+    if (!rowWithinYear(contractYear, plan.fromYear, plan.toYear)) return false
+    if (!matchesOptionalFilters(contract.country, contract.operator, plan.countries, plan.operators)) return false
+    return true
+  })
+  const contractKeywordFilter = applyKeywordFilterWithFallback(
+    baseContracts,
+    combinedKeywords,
+    (contract) => [
+      contract.project_name,
+      contract.description,
+      contract.country,
+      contract.operator,
+      contract.supplier,
+      contract.contract_type,
+    ].join(' ')
+  )
+  if (contractKeywordFilter.relaxed) keywordFallbackTables.push('contracts')
   const filteredContracts = sortByScoreAndYear(
-    contracts.filter((contract) => {
-      const contractYear = yearFromDate(contract.date) ?? yearFromDate(contract.announced_at)
-      if (!rowWithinYear(contractYear, plan.fromYear, plan.toYear)) return false
-      if (!matchesOptionalFilters(contract.country, contract.operator, plan.countries, plan.operators)) return false
-      if (!hasKeywordFilter) return true
-
-      const haystack = [
-        contract.project_name,
-        contract.description,
-        contract.country,
-        contract.operator,
-        contract.supplier,
-        contract.contract_type,
-      ].join(' ')
-
-      return keywordScore(haystack, combinedKeywords) > 0
-    }),
+    contractKeywordFilter.rows,
     (contract) => keywordScore([
       contract.project_name,
       contract.description,
@@ -829,72 +872,105 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
     480
   )
 
+  const baseForecasts = forecasts.filter((forecast) => rowWithinYear(forecast.year, plan.fromYear, plan.toYear))
+  const forecastKeywordFilter = applyKeywordFilterWithFallback(
+    baseForecasts,
+    combinedKeywords,
+    (forecast) => `${forecast.metric} ${forecast.unit} ${forecast.source}`
+  )
+  if (forecastKeywordFilter.relaxed) keywordFallbackTables.push('forecasts')
   const filteredForecasts = sortByScoreAndYear(
-    forecasts.filter((forecast) => {
-      if (!rowWithinYear(forecast.year, plan.fromYear, plan.toYear)) return false
-      if (!hasKeywordFilter) return true
-      const haystack = `${forecast.metric} ${forecast.unit} ${forecast.source}`
-      return keywordScore(haystack, combinedKeywords) > 0
-    }),
+    forecastKeywordFilter.rows,
     (forecast) => keywordScore(`${forecast.metric} ${forecast.unit} ${forecast.source}`, combinedKeywords),
     (forecast) => forecast.year,
     600
   )
 
+  const baseAwards = awards.filter((award) => {
+    if (!rowWithinYear(award.year, plan.fromYear, plan.toYear)) return false
+    if (!matchesOptionalFilters(award.country, award.operator, plan.countries, plan.operators)) return false
+    return true
+  })
+  const awardKeywordFilter = applyKeywordFilterWithFallback(
+    baseAwards,
+    combinedKeywords,
+    (award) => `${award.development_project} ${award.asset} ${award.country} ${award.operator}`
+  )
+  if (awardKeywordFilter.relaxed) keywordFallbackTables.push('upcoming_awards')
   const filteredAwards = sortByScoreAndYear(
-    awards.filter((award) => {
-      if (!rowWithinYear(award.year, plan.fromYear, plan.toYear)) return false
-      if (!matchesOptionalFilters(award.country, award.operator, plan.countries, plan.operators)) return false
-      if (!hasKeywordFilter) return true
-      const haystack = `${award.development_project} ${award.asset} ${award.country} ${award.operator}`
-      return keywordScore(haystack, combinedKeywords) > 0
-    }),
+    awardKeywordFilter.rows,
     (award) => keywordScore(`${award.development_project} ${award.asset} ${award.country} ${award.operator}`, combinedKeywords),
     (award) => award.year,
     420
   )
 
+  const baseXmt = xmtRows.filter((row) => {
+    if (!rowWithinYear(row.year, plan.fromYear, plan.toYear)) return false
+    if (!matchesOptionalFilters(row.country, row.operator, plan.countries, plan.operators)) return false
+    return true
+  })
+  const xmtKeywordFilter = applyKeywordFilterWithFallback(
+    baseXmt,
+    combinedKeywords,
+    (row) => `${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`
+  )
+  if (xmtKeywordFilter.relaxed) keywordFallbackTables.push('xmt_data')
   const filteredXmt = sortByScoreAndYear(
-    xmtRows.filter((row) => {
-      if (!rowWithinYear(row.year, plan.fromYear, plan.toYear)) return false
-      if (!matchesOptionalFilters(row.country, row.operator, plan.countries, plan.operators)) return false
-      if (!hasKeywordFilter) return true
-      return keywordScore(`${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`, combinedKeywords) > 0
-    }),
+    xmtKeywordFilter.rows,
     (row) => keywordScore(`${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`, combinedKeywords),
     (row) => row.year,
     900
   )
 
+  const baseSurf = surfRows.filter((row) => {
+    if (!rowWithinYear(row.year, plan.fromYear, plan.toYear)) return false
+    if (!matchesOptionalFilters(row.country, row.operator, plan.countries, plan.operators)) return false
+    return true
+  })
+  const surfKeywordFilter = applyKeywordFilterWithFallback(
+    baseSurf,
+    combinedKeywords,
+    (row) => `${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`
+  )
+  if (surfKeywordFilter.relaxed) keywordFallbackTables.push('surf_data')
   const filteredSurf = sortByScoreAndYear(
-    surfRows.filter((row) => {
-      if (!rowWithinYear(row.year, plan.fromYear, plan.toYear)) return false
-      if (!matchesOptionalFilters(row.country, row.operator, plan.countries, plan.operators)) return false
-      if (!hasKeywordFilter) return true
-      return keywordScore(`${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`, combinedKeywords) > 0
-    }),
+    surfKeywordFilter.rows,
     (row) => keywordScore(`${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`, combinedKeywords),
     (row) => row.year,
     900
   )
 
+  const baseSubsea = subseaRows.filter((row) => {
+    if (!rowWithinYear(row.year, plan.fromYear, plan.toYear)) return false
+    if (!matchesOptionalFilters(row.country, row.operator, plan.countries, plan.operators)) return false
+    return true
+  })
+  const subseaKeywordFilter = applyKeywordFilterWithFallback(
+    baseSubsea,
+    combinedKeywords,
+    (row) => `${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`
+  )
+  if (subseaKeywordFilter.relaxed) keywordFallbackTables.push('subsea_unit_data')
   const filteredSubsea = sortByScoreAndYear(
-    subseaRows.filter((row) => {
-      if (!rowWithinYear(row.year, plan.fromYear, plan.toYear)) return false
-      if (!matchesOptionalFilters(row.country, row.operator, plan.countries, plan.operators)) return false
-      if (!hasKeywordFilter) return true
-      return keywordScore(`${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`, combinedKeywords) > 0
-    }),
+    subseaKeywordFilter.rows,
     (row) => keywordScore(`${row.development_project} ${row.country} ${row.operator} ${row.surf_contractor}`, combinedKeywords),
     (row) => row.year,
     900
   )
 
-  const filteredDocs = docs.filter((doc) => {
-    if (!hasKeywordFilter) return true
-    const haystack = `${doc.file_name} ${doc.ai_summary}`
-    return keywordScore(haystack, combinedKeywords) > 0
-  }).slice(0, 30)
+  const docKeywordFilter = applyKeywordFilterWithFallback(
+    docs,
+    combinedKeywords,
+    (doc) => `${doc.file_name} ${doc.ai_summary}`
+  )
+  if (docKeywordFilter.relaxed) keywordFallbackTables.push('documents')
+  const filteredDocs = docKeywordFilter.rows.slice(0, 30)
+
+  if (combinedKeywords.length > 0 && keywordFallbackTables.length > 0) {
+    warnings.push(
+      `Keyword filter relaxed (no exact row match after hard filters) for tables: ${keywordFallbackTables.join(', ')}`
+    )
+  }
 
   const countryRank = topCounts([
     ...filteredProjects.map((row) => row.country),
@@ -990,6 +1066,12 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
       countries: plan.countries,
       operators: plan.operators,
       keywords: combinedKeywords,
+      keyword_filter_mode: combinedKeywords.length === 0
+        ? 'off'
+        : keywordFallbackTables.length > 0
+          ? 'relaxed'
+          : 'strict',
+      keyword_relaxed_tables: keywordFallbackTables,
     },
     counts,
     totals: {

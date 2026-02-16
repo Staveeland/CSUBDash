@@ -1,4 +1,24 @@
-import PDFDocument from 'pdfkit'
+type PDFDocumentCtor = new (options?: PDFKit.PDFDocumentOptions) => PDFKit.PDFDocument
+
+let cachedPdfDocumentCtor: PDFDocumentCtor | null = null
+
+async function getPdfDocumentCtor(): Promise<PDFDocumentCtor> {
+  if (cachedPdfDocumentCtor) return cachedPdfDocumentCtor
+
+  // Prefer standalone build because it embeds standard font metrics
+  // and avoids runtime fs lookups for Helvetica.afm in serverless.
+  try {
+    const standalone = await import('pdfkit/js/pdfkit.standalone.js')
+    const ctor = (standalone.default ?? standalone) as unknown as PDFDocumentCtor
+    cachedPdfDocumentCtor = ctor
+    return ctor
+  } catch {
+    const nodeBuild = await import('pdfkit')
+    const ctor = (nodeBuild.default ?? nodeBuild) as PDFDocumentCtor
+    cachedPdfDocumentCtor = ctor
+    return ctor
+  }
+}
 
 const COLORS = {
   background: '#0A1714',
@@ -230,6 +250,8 @@ function writeFooter(doc: PDFKit.PDFDocument): void {
 }
 
 export async function buildReportPdfBuffer(input: BuildReportPdfInput): Promise<Buffer> {
+  const PDFDocument = await getPdfDocumentCtor()
+
   const doc = new PDFDocument({
     size: 'A4',
     margins: { top: 40, right: 44, bottom: 44, left: 44 },
