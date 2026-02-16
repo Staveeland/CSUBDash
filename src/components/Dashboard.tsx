@@ -95,8 +95,24 @@ interface ActivityItem {
   meta: string
 }
 
+interface MetricTrend {
+  latest: ForecastRecord | null
+  previous: ForecastRecord | null
+  delta: number | null
+  deltaPct: number | null
+}
+
+interface PreparedReport {
+  report: ReportRecord
+  parsed: ParsedReport
+  displayPeriod: string
+  preview: string
+  hasNarrative: boolean
+  salesActions: string[]
+}
+
 const DONUT_COLORS = ['#4db89e', '#38917f', '#2d7368', '#c9a84c', '#7dd4bf', '#245a4e']
-const REGION_COLORS = ['#4db89e', '#c9a84c', '#e06c75', '#61afef', '#c678dd', '#d19a66']
+const REGION_COLORS = ['#5f87a8', '#7ea18b', '#b08f68', '#827fba', '#9f768f', '#6b9f9c']
 const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3c34']
 const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
 
@@ -528,6 +544,94 @@ function parseReportSummary(summary: string | null): ParsedReport {
   }
 }
 
+function inferReportPeriodFromFileName(fileName: string): string | null {
+  const source = fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
+  if (!source) return null
+
+  const quarterMatch = source.match(/\bq([1-4])\s*(20\d{2}|\d{2})\b/i) || source.match(/\b(20\d{2})\s*q([1-4])\b/i)
+  if (quarterMatch) {
+    if (/^q/i.test(quarterMatch[0])) {
+      const year = quarterMatch[2].length === 2 ? `20${quarterMatch[2]}` : quarterMatch[2]
+      return `Q${quarterMatch[1]} ${year}`
+    }
+    return `Q${quarterMatch[2]} ${quarterMatch[1]}`
+  }
+
+  const yearMatch = source.match(/\b(20\d{2})\b/)
+  if (yearMatch) return yearMatch[1]
+  return null
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (compact.length <= maxLength) return compact
+  return `${compact.slice(0, maxLength).trimEnd()}…`
+}
+
+function buildMetricTrend(series: ForecastRecord[]): MetricTrend {
+  if (!series.length) return { latest: null, previous: null, delta: null, deltaPct: null }
+  const latest = series[series.length - 1] ?? null
+  const previous = series.length > 1 ? series[series.length - 2] : null
+  if (!latest || !previous) {
+    return { latest, previous, delta: null, deltaPct: null }
+  }
+
+  const delta = latest.value - previous.value
+  const deltaPct = previous.value !== 0 ? (delta / previous.value) * 100 : null
+
+  return { latest, previous, delta, deltaPct }
+}
+
+function buildTrendLabel(trend: MetricTrend, formatter: (value: number) => string): string | null {
+  if (!trend.previous || trend.delta === null) return null
+  const sign = trend.delta > 0 ? '+' : trend.delta < 0 ? '-' : ''
+  const deltaLabel = formatter(Math.abs(trend.delta))
+  const pctLabel = trend.deltaPct === null ? '' : ` (${trend.deltaPct > 0 ? '+' : ''}${trend.deltaPct.toFixed(1)}%)`
+  return `vs ${trend.previous.year}: ${sign}${deltaLabel}${pctLabel}`
+}
+
+function getTrendTone(delta: number | null): 'up' | 'down' | 'flat' {
+  if (delta === null || Math.abs(delta) < 0.001) return 'flat'
+  return delta > 0 ? 'up' : 'down'
+}
+
+function buildSalesActions(parsed: ParsedReport): string[] {
+  const corpus = `${parsed.title ?? ''} ${parsed.highlights.join(' ')} ${parsed.narrative}`.toLowerCase()
+  const actions: string[] = []
+
+  if (/(north sea|nordsj|norway|uk|europe)/.test(corpus)) {
+    actions.push('Prioriter account-oppfolging i Nordsjoen de neste 2 ukene.')
+  }
+  if (/(gulf|gom|mexico|north america|usa)/.test(corpus)) {
+    actions.push('Aktiver GoM-operatorer med tidlige salgsmoter og qualification.')
+  }
+  if (/(award|tender|bid|fid|sanction)/.test(corpus)) {
+    actions.push('Legg inn tender/award-watchlist og oppdater sannsynlighet i CRM.')
+  }
+  if (/(xmt|tree)/.test(corpus)) {
+    actions.push('Koble inn XMT-team for scope-estimat mot hoyeste sannsynlige prosjekter.')
+  }
+  if (/(surf|umbilical|flowline|pipeline)/.test(corpus)) {
+    actions.push('Planlegg SURF-kapasitet tidlig for regionene med stigende spend.')
+  }
+
+  if (!actions.length) {
+    if (parsed.highlights.length > 0) {
+      actions.push(`Fokuser salgspitch pa signalet: "${truncateText(parsed.highlights[0], 90)}"`)
+    }
+    actions.push('Oppdater account-plan for topp 5 kunder basert pa rapporten.')
+    actions.push('Del relevante KPIer i neste forecast-mote for felles prioritering.')
+  }
+
+  return actions.slice(0, 3)
+}
+
+function formatReportDate(dateValue: string): string {
+  const parsed = new Date(dateValue)
+  if (Number.isNaN(parsed.getTime())) return 'Ukjent dato'
+  return parsed.toLocaleDateString('nb-NO')
+}
+
 function LoadingPlaceholder({ text = 'Laster...' }: { text?: string }) {
   return <div className="text-center py-6 text-sm text-[var(--text-muted)] animate-pulse">{text}</div>
 }
@@ -575,6 +679,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [reports, setReports] = useState<ReportRecord[]>([])
   const [marketLoading, setMarketLoading] = useState(true)
   const [expandedReport, setExpandedReport] = useState<string | null>(null)
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
 
   const userLabel = getUserDisplayName(userEmail)
   const userInitials = getInitials(userLabel)
@@ -669,6 +774,18 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     return buildMetricSeriesByYear(forecasts, isXmtMetric, XMT_METRIC_ALIASES)
   }, [forecasts])
 
+  const surfByYear = useMemo(() => {
+    return buildMetricSeriesByYear(forecasts, isSurfMetric, SURF_METRIC_ALIASES)
+  }, [forecasts])
+
+  const growthByYear = useMemo(() => {
+    return buildMetricSeriesByYear(forecasts, isGrowthMetric, GROWTH_METRIC_ALIASES)
+  }, [forecasts])
+
+  const brentByYear = useMemo(() => {
+    return buildMetricSeriesByYear(forecasts, isBrentMetric, BRENT_METRIC_ALIASES)
+  }, [forecasts])
+
   const regionalSpendData = useMemo(() => {
     const regionLookup = new Map<string, string>(
       REGION_KEYS.map((item) => [normalizeMetricName(item.key), item.label])
@@ -686,9 +803,120 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       .sort((a, b) => a.year - b.year)
   }, [forecasts])
 
+  const reportInsights = useMemo<PreparedReport[]>(() => {
+    return reports.map((report) => {
+      const parsed = parseReportSummary(report.ai_summary)
+      const displayPeriod =
+        report.report_period?.trim() ||
+        parsed.title?.trim() ||
+        inferReportPeriodFromFileName(report.file_name) ||
+        report.file_name
+      const previewSource = parsed.highlights[0] || parsed.narrative || report.file_name
+
+      return {
+        report,
+        parsed,
+        displayPeriod,
+        preview: truncateText(previewSource, 150),
+        hasNarrative: parsed.narrative.length > 0 || Boolean(report.ai_summary?.trim()),
+        salesActions: buildSalesActions(parsed),
+      }
+    })
+  }, [reports])
+
+  useEffect(() => {
+    if (!reportInsights.length) {
+      if (selectedReportId !== null) setSelectedReportId(null)
+      setExpandedReport(null)
+      return
+    }
+
+    if (!selectedReportId || !reportInsights.some((item) => item.report.id === selectedReportId)) {
+      setSelectedReportId(reportInsights[0].report.id)
+    }
+  }, [reportInsights, selectedReportId])
+
+  useEffect(() => {
+    setExpandedReport(null)
+  }, [selectedReportId])
+
+  const selectedReportInsight = useMemo(() => {
+    if (!reportInsights.length) return null
+    if (!selectedReportId) return reportInsights[0]
+    return reportInsights.find((item) => item.report.id === selectedReportId) ?? reportInsights[0]
+  }, [reportInsights, selectedReportId])
+
+  const regionalSummary = useMemo(() => {
+    if (!regionalSpendData.length) return null
+    const latest = regionalSpendData[regionalSpendData.length - 1]
+    const previous = regionalSpendData.length > 1 ? regionalSpendData[regionalSpendData.length - 2] : null
+    const latestValues = latest as Record<string, number>
+    const previousValues = previous as Record<string, number> | null
+
+    const values = REGION_KEYS.map((region) => {
+      const current = latestValues[region.label]
+      return {
+        label: region.label,
+        value: typeof current === 'number' && Number.isFinite(current) ? current : 0,
+      }
+    }).filter((item) => item.value > 0)
+
+    const total = values.reduce((sum, item) => sum + item.value, 0)
+    const previousTotal = previous
+      ? REGION_KEYS.reduce((sum, region) => {
+          const prior = previousValues?.[region.label]
+          return sum + (typeof prior === 'number' && Number.isFinite(prior) ? prior : 0)
+        }, 0)
+      : null
+
+    const yoyDelta = previousTotal !== null ? total - previousTotal : null
+    const yoyPct = previousTotal !== null && previousTotal !== 0 ? (yoyDelta! / previousTotal) * 100 : null
+    const sorted = [...values].sort((a, b) => b.value - a.value)
+    const topRegion = sorted[0] ?? null
+
+    return {
+      latestYear: latest.year,
+      previousYear: previous?.year ?? null,
+      total,
+      yoyDelta,
+      yoyPct,
+      topRegion,
+      coverageCount: values.length,
+      topShares: sorted.slice(0, 4).map((item) => ({
+        ...item,
+        share: total > 0 ? (item.value / total) * 100 : 0,
+      })),
+    }
+  }, [regionalSpendData])
+
+  const marketMeta = useMemo(() => {
+    const years = Array.from(new Set(forecasts.map((forecast) => forecast.year)))
+      .filter((year) => Number.isFinite(year))
+      .sort((a, b) => a - b)
+
+    const forecastCoverage =
+      years.length > 1
+        ? `${years[0]}-${years[years.length - 1]}`
+        : years.length === 1
+          ? String(years[0])
+          : '—'
+
+    const latestReportDate = reports[0]?.created_at ? formatReportDate(reports[0].created_at) : '—'
+
+    return {
+      forecastCoverage,
+      latestReportDate,
+    }
+  }, [forecasts, reports])
+
   const latestMetrics = useMemo(() => {
-    const latestReport = reports.find((report) => Boolean(report.ai_summary))
-    const parsedLatestReport = parseReportSummary(latestReport?.ai_summary ?? null)
+    const latestReport = reportInsights.find((item) => Boolean(item.report.ai_summary?.trim()))
+    const parsedLatestReport = latestReport?.parsed ?? {
+      title: null,
+      highlights: [],
+      keyFigures: [],
+      narrative: '',
+    }
 
     const getFromReportFigures = (aliases: string[]) => {
       const normalizedAliases = aliases.map((alias) => normalizeMetricName(alias))
@@ -734,7 +962,9 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
     if (!spend && !xmt && !surf && !growth && !brent) return null
 
-    const fallbackYear = parseYearFromText(parsedLatestReport.title ?? '') ?? new Date().getFullYear()
+    const fallbackYear =
+      parseYearFromText(latestReport?.displayPeriod ?? parsedLatestReport.title ?? '') ??
+      new Date().getFullYear()
 
     return {
       year: maxYear ?? fallbackYear,
@@ -744,19 +974,64 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       growth,
       brent,
     }
-  }, [forecasts, reports])
+  }, [forecasts, reportInsights])
 
   const keyMetricCards = useMemo(() => {
     if (!latestMetrics) return []
 
+    const spendTrend = buildMetricTrend(spendingByYear)
+    const xmtTrend = buildMetricTrend(xmtByYear)
+    const surfTrend = buildMetricTrend(surfByYear)
+    const growthTrend = buildMetricTrend(growthByYear)
+    const brentTrend = buildMetricTrend(brentByYear)
+
+    const growthTrendLabel = growthTrend.previous && growthTrend.delta !== null
+      ? `vs ${growthTrend.previous.year}: ${growthTrend.delta > 0 ? '+' : ''}${growthTrend.delta.toFixed(1)} pp`
+      : null
+
     return [
-      { label: 'Total Subsea Spend', data: latestMetrics.spend, fmt: (v: number) => `$${v.toFixed(1)}B` },
-      { label: 'XMT Installations', data: latestMetrics.xmt, fmt: (v: number) => v.toLocaleString('en-US') },
-      { label: 'SURF km', data: latestMetrics.surf, fmt: (v: number) => `${v.toLocaleString('en-US')} km` },
-      { label: 'YoY Growth', data: latestMetrics.growth, fmt: (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%` },
-      { label: 'Brent Oil Price', data: latestMetrics.brent, fmt: (v: number) => `$${v.toFixed(0)}/bbl` },
+      {
+        label: 'Total Subsea Spend',
+        source: 'Market Reports',
+        data: latestMetrics.spend,
+        fmt: (v: number) => `$${v.toFixed(1)}B`,
+        trendLabel: buildTrendLabel(spendTrend, (v) => `$${v.toFixed(1)}B`),
+        trendTone: getTrendTone(spendTrend.delta),
+      },
+      {
+        label: 'XMT Installations',
+        source: 'Market Reports',
+        data: latestMetrics.xmt,
+        fmt: (v: number) => Math.round(v).toLocaleString('en-US'),
+        trendLabel: buildTrendLabel(xmtTrend, (v) => Math.round(v).toLocaleString('en-US')),
+        trendTone: getTrendTone(xmtTrend.delta),
+      },
+      {
+        label: 'SURF km',
+        source: 'Market Reports',
+        data: latestMetrics.surf,
+        fmt: (v: number) => `${Math.round(v).toLocaleString('en-US')} km`,
+        trendLabel: buildTrendLabel(surfTrend, (v) => `${Math.round(v).toLocaleString('en-US')} km`),
+        trendTone: getTrendTone(surfTrend.delta),
+      },
+      {
+        label: 'YoY Growth',
+        source: 'Market Reports',
+        data: latestMetrics.growth,
+        fmt: (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`,
+        trendLabel: growthTrendLabel,
+        trendTone: getTrendTone(growthTrend.delta),
+      },
+      {
+        label: 'Brent Oil Price',
+        source: 'Market Reports',
+        data: latestMetrics.brent,
+        fmt: (v: number) => `$${v.toFixed(0)}/bbl`,
+        trendLabel: buildTrendLabel(brentTrend, (v) => `$${v.toFixed(0)}/bbl`),
+        trendTone: getTrendTone(brentTrend.delta),
+      },
     ].filter((item) => item.data !== null)
-  }, [latestMetrics])
+  }, [brentByYear, growthByYear, latestMetrics, spendingByYear, surfByYear, xmtByYear])
 
   const reportStats = useMemo(() => {
     return {
@@ -764,8 +1039,9 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       withSummary: reports.filter((report) => Boolean(report.ai_summary?.trim())).length,
       withPdf: reports.filter((report) => Boolean(report.download_url)).length,
       forecastPoints: forecasts.length,
+      latestReportDate: marketMeta.latestReportDate,
     }
-  }, [forecasts, reports])
+  }, [forecasts.length, marketMeta.latestReportDate, reports])
 
   const regionProjects = useMemo(
     () => projects.filter((project) => belongsToRegion(project, region)),
@@ -883,6 +1159,9 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   }
 
   const viewLabel = view === 'historical' ? 'Historiske Contract Awards' : 'Kommende Prosjekter'
+  const regionalTotal = regionalSummary?.total ?? 0
+  const regionalYoyDelta = regionalSummary?.yoyDelta ?? null
+  const regionalTopRegion = regionalSummary?.topRegion ?? null
 
   return (
     <div className="min-h-screen bg-[var(--bg-dark)] text-gray-100">
@@ -1292,8 +1571,30 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         </section>
 
         {/* ── Market Intelligence ── */}
+        <section className="rounded-xl border border-[var(--csub-gold-soft)] bg-[linear-gradient(135deg,rgba(201,168,76,0.08),rgba(77,184,158,0.06))] p-5">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--csub-gold)]">Market Reports</p>
+              <h2 className="text-xl text-white mt-1">Market Intelligence Workspace</h2>
+              <p className="text-sm text-[var(--text-muted)] mt-1">
+                Alle paneler under bygger pa AI-tolkede PDF-rapporter og forecast-tabeller.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 w-full lg:w-auto">
+              <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Siste rapport</p>
+                <p className="font-mono text-sm text-white mt-1">{marketMeta.latestReportDate}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Forecast range</p>
+                <p className="font-mono text-sm text-white mt-1">{marketMeta.forecastCoverage}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Panel title="Global Subsea Spending Forecast">
+          <Panel title="Global Subsea Spending Forecast" subtitle={`Coverage ${marketMeta.forecastCoverage}`}>
             {marketLoading ? (
               <LoadingPlaceholder text="Laster markedsdata..." />
             ) : !spendingByYear.length ? (
@@ -1319,7 +1620,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             )}
           </Panel>
 
-          <Panel title="XMT Installations Forecast">
+          <Panel title="XMT Installations Forecast" subtitle="Kilde: AI markedsrapporter">
             {marketLoading ? (
               <LoadingPlaceholder text="Laster markedsdata..." />
             ) : !xmtByYear.length ? (
@@ -1341,45 +1642,92 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         </section>
 
         <section>
-          <Panel title="Regional Subsea Spending Breakdown">
+          <Panel title="Regional Subsea Spending Breakdown" subtitle={regionalSummary ? `${regionalSummary.latestYear}` : 'Market reports'}>
             {marketLoading ? (
               <LoadingPlaceholder text="Laster regionale data..." />
             ) : !regionalSpendData.length ? (
               <LoadingPlaceholder text="Ingen regionale spending-data tilgjengelig" />
             ) : (
-              <div className="h-[400px]">
-                <ResponsiveContainer>
-                  <BarChart data={regionalSpendData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
-                    <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} tickFormatter={(v: number) => `$${v}B`} />
-                    <Tooltip content={<RegionalTooltip />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
-                    <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'var(--font-mono)' }} />
-                    {REGION_KEYS.map((r, i) => (
-                      <Bar key={r.key} dataKey={r.label} stackId="regions" fill={REGION_COLORS[i % REGION_COLORS.length]} />
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Total spend</p>
+                    <p className="font-mono text-xl text-white mt-1">
+                      ${regionalTotal.toFixed(1)}B
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">YoY endring</p>
+                    <p className={`font-mono text-xl mt-1 ${regionalYoyDelta !== null && regionalYoyDelta > 0 ? 'text-[var(--csub-light)]' : regionalYoyDelta !== null && regionalYoyDelta < 0 ? 'text-[#d29884]' : 'text-white'}`}>
+                      {regionalYoyDelta === null ? '—' : `${regionalYoyDelta > 0 ? '+' : ''}${regionalYoyDelta.toFixed(1)}B`}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Sterkeste region</p>
+                    <p className="font-mono text-sm text-white mt-1 truncate">{regionalTopRegion?.label ?? '—'}</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">
+                      {regionalTopRegion ? `$${regionalTopRegion.value.toFixed(1)}B` : '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Datadekning</p>
+                    <p className="font-mono text-xl text-white mt-1">{regionalSummary?.coverageCount ?? 0}</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">regioner med verdi</p>
+                  </div>
+                </div>
+
+                <div className="h-[360px]">
+                  <ResponsiveContainer>
+                    <BarChart data={regionalSpendData} barCategoryGap="24%">
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.1} />
+                      <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} tickFormatter={(v: number) => `$${v}B`} />
+                      <Tooltip content={<RegionalTooltip />} cursor={{ fill: 'rgba(77,184,158,0.04)' }} />
+                      <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#8ca8a0' }} />
+                      {REGION_KEYS.map((region, index) => (
+                        <Bar
+                          key={region.key}
+                          dataKey={region.label}
+                          stackId="regions"
+                          fill={REGION_COLORS[index % REGION_COLORS.length]}
+                          maxBarSize={56}
+                        />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {regionalSummary?.topShares?.length ? (
+                  <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                    {regionalSummary.topShares.map((item) => (
+                      <div key={item.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] p-3">
+                        <p className="text-xs text-[var(--text-muted)] truncate">{item.label}</p>
+                        <p className="font-mono text-sm text-white mt-1">${item.value.toFixed(1)}B</p>
+                        <p className="text-xs text-[var(--text-muted)] mt-1">{item.share.toFixed(1)}% av totalen</p>
+                      </div>
                     ))}
-                  </BarChart>
-                </ResponsiveContainer>
+                  </div>
+                ) : null}
               </div>
             )}
           </Panel>
         </section>
 
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Panel title="Siste markedsrapporter">
+          <Panel title="Siste markedsrapporter" subtitle="Klikk pa en rapport for detaljer">
             {marketLoading ? (
               <LoadingPlaceholder text="Laster rapporter..." />
-            ) : !reports.length ? (
+            ) : !reportInsights.length ? (
               <LoadingPlaceholder text="Ingen rapporter tilgjengelig" />
             ) : (
-              <div className="flex flex-col gap-3 max-h-[500px] overflow-y-auto">
-                <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                   <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Rapporter</p>
                     <p className="font-mono text-lg text-white">{reportStats.totalReports}</p>
                   </div>
                   <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Med sammendrag</p>
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Med AI-sammendrag</p>
                     <p className="font-mono text-lg text-white">{reportStats.withSummary}</p>
                   </div>
                   <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
@@ -1387,99 +1735,148 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                     <p className="font-mono text-lg text-white">{reportStats.withPdf}</p>
                   </div>
                   <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Forecast points</p>
-                    <p className="font-mono text-lg text-white">{reportStats.forecastPoints}</p>
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Siste oppdatert</p>
+                    <p className="font-mono text-sm text-white mt-1">{reportStats.latestReportDate}</p>
                   </div>
                 </div>
 
-                {reports.slice(0, 6).map((report) => {
-                  const parsed = parseReportSummary(report.ai_summary)
-                  const hasNarrative = parsed.narrative.length > 0 || Boolean(report.ai_summary)
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+                  <div className="xl:col-span-5 space-y-2 max-h-[460px] overflow-y-auto pr-1">
+                    {reportInsights.slice(0, 12).map((item) => {
+                      const isActive = selectedReportInsight?.report.id === item.report.id
 
-                  return (
-                    <div key={report.id} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] overflow-hidden">
-                      <div className="px-4 py-3">
-                        <div className="flex justify-between items-start gap-2">
+                      return (
+                        <button
+                          key={item.report.id}
+                          type="button"
+                          onClick={() => setSelectedReportId(item.report.id)}
+                          className={`w-full text-left rounded-lg border p-3 transition-colors cursor-pointer ${isActive ? 'border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.12)]' : 'border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] hover:bg-[color:rgba(77,184,158,0.08)]'}`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-semibold text-white truncate">{item.displayPeriod}</p>
+                            <span className={`text-[10px] uppercase tracking-wider shrink-0 ${item.report.download_url ? 'text-[var(--csub-gold)]' : 'text-[var(--text-muted)]'}`}>
+                              {item.report.download_url ? 'PDF' : 'No PDF'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[var(--text-muted)] font-mono mt-1">{formatReportDate(item.report.created_at)}</p>
+                          <p className="text-xs text-[var(--text-muted)] mt-2 leading-relaxed">{item.preview}</p>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div className="xl:col-span-7 rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-4">
+                    {!selectedReportInsight ? null : (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white">{report.report_period || parsed.title || report.file_name}</p>
-                            <p className="text-xs text-[var(--text-muted)] font-mono mt-1">
-                              {new Date(report.created_at).toLocaleDateString('nb-NO')}
+                            <p className="text-base font-semibold text-white truncate">{selectedReportInsight.displayPeriod}</p>
+                            <p className="text-xs text-[var(--text-muted)] mt-1">
+                              Lastet opp {formatReportDate(selectedReportInsight.report.created_at)}
                             </p>
                           </div>
-                        </div>
-
-                        {parsed.highlights.length > 0 && (
-                          <ul className="mt-3 space-y-1.5">
-                            {parsed.highlights.map((h, i) => (
-                              <li key={i} className="flex items-start gap-2 text-xs text-[var(--text-muted)] leading-relaxed">
-                                <span className="mt-0.5 shrink-0 text-[var(--csub-gold)]">•</span>
-                                <span>{h}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-
-                        {parsed.keyFigures.length > 0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {parsed.keyFigures.map((kf, i) => (
-                              <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[color:rgba(77,184,158,0.12)] border border-[var(--csub-light-soft)] px-2.5 py-1 text-[11px]">
-                                <span className="text-[var(--text-muted)]">{kf.label}:</span>
-                                <span className="font-mono font-semibold text-white">{kf.value}</span>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="mt-3 flex items-center gap-3">
-                          {hasNarrative && (
-                            <button
-                              type="button"
-                              onClick={() => setExpandedReport(expandedReport === report.id ? null : report.id)}
-                              className="text-xs text-[var(--csub-light)] hover:text-white transition-colors cursor-pointer"
-                            >
-                              {expandedReport === report.id ? '▲ Skjul sammendrag' : '▼ Les sammendrag'}
-                            </button>
-                          )}
-                          {report.download_url && (
+                          {selectedReportInsight.report.download_url && (
                             <a
-                              href={report.download_url}
+                              href={selectedReportInsight.report.download_url}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-xs text-[var(--csub-gold)] hover:text-white transition-colors"
+                              className="text-xs rounded-md border border-[var(--csub-gold-soft)] px-2.5 py-1 text-[var(--csub-gold)] hover:text-white hover:border-[var(--csub-light)] transition-colors"
                             >
                               Open PDF
                             </a>
                           )}
                         </div>
-                      </div>
-                      {expandedReport === report.id && hasNarrative && (
-                        <div className="px-4 pb-4 text-sm text-[var(--text-muted)] leading-relaxed border-t border-[var(--csub-light-faint)]">
-                          <p className="mt-3 whitespace-pre-line">{parsed.narrative || report.ai_summary}</p>
+
+                        <div className="mt-4">
+                          <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--csub-light)]">Salgstiltak</p>
+                          <div className="mt-2 space-y-2">
+                            {selectedReportInsight.salesActions.map((action, index) => (
+                              <div key={`${selectedReportInsight.report.id}-action-${index}`} className="rounded-md border border-[var(--csub-light-soft)] bg-[color:rgba(77,184,158,0.08)] px-3 py-2 text-xs text-white">
+                                {action}
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
+
+                        {selectedReportInsight.parsed.keyFigures.length > 0 && (
+                          <div className="mt-4">
+                            <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">Nokkelfigurer</p>
+                            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {selectedReportInsight.parsed.keyFigures.slice(0, 6).map((keyFigure, index) => (
+                                <div key={`${selectedReportInsight.report.id}-figure-${index}`} className="rounded-md border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] px-2.5 py-2">
+                                  <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] truncate">{keyFigure.label}</p>
+                                  <p className="font-mono text-sm text-white mt-1">{keyFigure.value}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {selectedReportInsight.parsed.highlights.length > 0 && (
+                          <div className="mt-4">
+                            <p className="text-[11px] uppercase tracking-[0.15em] text-[var(--text-muted)]">Highlights</p>
+                            <ul className="mt-2 space-y-1.5">
+                              {selectedReportInsight.parsed.highlights.slice(0, 4).map((highlight, index) => (
+                                <li key={`${selectedReportInsight.report.id}-highlight-${index}`} className="flex items-start gap-2 text-xs text-[var(--text-muted)] leading-relaxed">
+                                  <span className="mt-0.5 shrink-0 text-[var(--csub-gold)]">•</span>
+                                  <span>{highlight}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {selectedReportInsight.hasNarrative && (
+                          <div className="mt-4">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedReport(expandedReport === selectedReportInsight.report.id ? null : selectedReportInsight.report.id)}
+                              className="text-xs text-[var(--csub-light)] hover:text-white transition-colors cursor-pointer"
+                            >
+                              {expandedReport === selectedReportInsight.report.id ? '▲ Skjul sammendrag' : '▼ Les sammendrag'}
+                            </button>
+                            {expandedReport === selectedReportInsight.report.id && (
+                              <p className="mt-3 whitespace-pre-line text-sm text-[var(--text-muted)] leading-relaxed border-t border-[var(--csub-light-faint)] pt-3">
+                                {selectedReportInsight.parsed.narrative || selectedReportInsight.report.ai_summary}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </Panel>
 
-          <Panel title="Nøkkeltall" subtitle={latestMetrics ? `${latestMetrics.year}` : undefined}>
+          <Panel title="Nokkeltall fra markedsrapporter" subtitle={latestMetrics ? `${latestMetrics.year}` : undefined}>
             {marketLoading ? (
-              <LoadingPlaceholder text="Laster nøkkeltall..." />
+              <LoadingPlaceholder text="Laster nokkeltall..." />
             ) : !latestMetrics ? (
               <LoadingPlaceholder text="Ingen forecast-data tilgjengelig" />
             ) : !keyMetricCards.length ? (
               <LoadingPlaceholder text="Fant forecast-data, men ingen gjenkjente KPI-metrikker." />
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {keyMetricCards.map((item) => (
-                  <div key={item.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4">
-                    <span className="text-xs font-sans text-[var(--text-muted)] uppercase tracking-wider">{item.label}</span>
-                    <p className="text-2xl font-mono font-semibold text-white mt-2">{item.fmt(item.data!.value)}</p>
-                  </div>
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {keyMetricCards.map((item) => (
+                    <div key={item.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-sans text-[var(--text-muted)] uppercase tracking-wider">{item.label}</span>
+                        <span className="text-[10px] uppercase tracking-wider text-[var(--csub-gold)]">{item.source}</span>
+                      </div>
+                      <p className="text-2xl font-mono font-semibold text-white mt-2">{item.fmt(item.data!.value)}</p>
+                      <p className={`text-xs font-mono mt-2 ${item.trendTone === 'up' ? 'text-[var(--csub-light)]' : item.trendTone === 'down' ? 'text-[#d29884]' : 'text-[var(--text-muted)]'}`}>
+                        {item.trendLabel || 'Ingen sammenlignbar historikk ennå'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2 text-xs text-[var(--text-muted)]">
+                  Dette KPI-panelet bruker kun data fra markedsrapporter/forecasts, ikke prosjekt-tabellen over.
+                </div>
+              </>
             )}
           </Panel>
         </section>
@@ -1560,13 +1957,28 @@ function MarketTooltip({ active, payload, label, unit }: { active?: boolean; pay
 
 function RegionalTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name?: string; value?: number; color?: string }>; label?: string | number }) {
   if (!active || !payload?.length) return null
+
+  const entries = payload
+    .map((entry) => ({
+      name: entry.name ?? 'Unknown',
+      value: typeof entry.value === 'number' ? entry.value : Number(entry.value ?? 0),
+      color: entry.color ?? '#8ca8a0',
+    }))
+    .filter((entry) => Number.isFinite(entry.value) && entry.value > 0)
+    .sort((a, b) => b.value - a.value)
+
+  const total = entries.reduce((sum, entry) => sum + entry.value, 0)
+
   return (
-    <div className="bg-[var(--csub-dark)] p-3 rounded-lg border border-[var(--csub-light-soft)] shadow-xl max-w-[240px]">
+    <div className="bg-[var(--csub-dark)] p-3 rounded-lg border border-[var(--csub-light-soft)] shadow-xl max-w-[280px]">
       <p className="text-xs text-[var(--text-muted)] mb-2 font-semibold">{label}</p>
-      {payload.map((entry) => (
+      <p className="text-xs text-white font-mono mb-2">${total.toFixed(1)}B total</p>
+      {entries.map((entry) => (
         <div key={entry.name} className="flex justify-between gap-4 text-xs py-0.5">
           <span style={{ color: entry.color }}>{entry.name}</span>
-          <span className="font-mono text-white">${(entry.value ?? 0).toFixed(1)}B</span>
+          <span className="font-mono text-white">
+            ${entry.value.toFixed(1)}B ({total > 0 ? ((entry.value / total) * 100).toFixed(1) : '0.0'}%)
+          </span>
         </div>
       ))}
     </div>
