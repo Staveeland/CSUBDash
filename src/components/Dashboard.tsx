@@ -2269,14 +2269,126 @@ function sanitizeUploadFileName(name: string): string {
     .replace(/[^a-zA-Z0-9._-]/g, '_')
 }
 
-function DropZone({ onImportComplete }: { onImportComplete?: () => void }) {
+function DropZone({ onImportComplete }: { onImportComplete?: () => void | Promise<void> }) {
   const [isDragging, setIsDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const maxSizeBytes = 25 * 1024 * 1024
+  const maxPollDurationMs = 8 * 60 * 1000
+  const isBusy = uploading || Boolean(activeJobId)
+
+  useEffect(() => {
+    if (!activeJobId) return
+
+    let cancelled = false
+    let finished = false
+    let intervalId = 0
+    let timeoutId = 0
+
+    const finishPolling = () => {
+      finished = true
+      window.clearInterval(intervalId)
+      window.clearTimeout(timeoutId)
+    }
+
+    const pollJob = async () => {
+      if (cancelled || finished) return
+
+      try {
+        const response = await fetch(`/api/import/status?job_id=${encodeURIComponent(activeJobId)}`, {
+          cache: 'no-store',
+        })
+        const payload = await response.json().catch(() => [])
+        if (!response.ok) {
+          throw new Error((payload as { error?: string })?.error || `Status API feilet (${response.status})`)
+        }
+
+        const rows = Array.isArray(payload) ? payload : []
+        const job = rows[0] as {
+          status?: string
+          records_total?: number | null
+          records_imported?: number | null
+          error_message?: string | null
+        } | undefined
+
+        if (!job) {
+          setStatusMessage('Rapport i kø. Venter på prosessering...')
+          return
+        }
+
+        const status = typeof job.status === 'string' ? job.status : ''
+
+        if (status === 'pending') {
+          setStatusMessage('Rapport i kø. Venter på prosessering...')
+          return
+        }
+
+        if (status === 'processing') {
+          const imported = Number(job.records_imported ?? 0)
+          const total = Number(job.records_total ?? 0)
+          if (Number.isFinite(total) && total > 0) {
+            setStatusMessage(`Genererer markedsrapport... (${imported}/${total})`)
+          } else {
+            setStatusMessage('Genererer markedsrapport med AI...')
+          }
+          return
+        }
+
+        if (status === 'completed') {
+          finishPolling()
+          setActiveJobId(null)
+          setErrorMessage(null)
+          setStatusMessage('Rapport ferdig. Oppdaterer dashboard...')
+          try {
+            await onImportComplete?.()
+            setStatusMessage('Rapport ferdig. Dashboardet er oppdatert.')
+          } catch (refreshError) {
+            const message = refreshError instanceof Error ? refreshError.message : String(refreshError)
+            setErrorMessage(`Rapport ferdig, men oppdatering feilet: ${message}`)
+            setStatusMessage('Rapport ferdig, men dashboardet ble ikke oppdatert automatisk.')
+          }
+          return
+        }
+
+        if (status === 'failed') {
+          finishPolling()
+          setActiveJobId(null)
+          setStatusMessage(null)
+          setErrorMessage(job.error_message || 'AI-prosesseringen feilet.')
+          return
+        }
+
+        setStatusMessage('Venter på status fra importmotor...')
+      } catch {
+        if (cancelled || finished) return
+        setStatusMessage('Mister kontakt med importmotor. Forsoker igjen...')
+      }
+    }
+
+    void pollJob()
+    intervalId = window.setInterval(() => {
+      void pollJob()
+    }, 3000)
+    timeoutId = window.setTimeout(() => {
+      if (cancelled || finished) return
+      finishPolling()
+      setActiveJobId(null)
+      setStatusMessage(null)
+      setErrorMessage('Import tok for lang tid. Sjekk status igjen om litt.')
+    }, maxPollDurationMs)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      window.clearTimeout(timeoutId)
+    }
+  }, [activeJobId, maxPollDurationMs, onImportComplete])
 
   const queueMarketReport = useCallback(async (file: File) => {
+    if (isBusy) return
+
     if (!file.name.toLowerCase().endsWith('.pdf')) {
       setErrorMessage('Kun PDF støttes her.')
       return
@@ -2325,21 +2437,24 @@ function DropZone({ onImportComplete }: { onImportComplete?: () => void }) {
         throw new Error(payload?.error || `Kunne ikke starte import (${response.status})`)
       }
 
-      setStatusMessage('Rapport i kø. Oppdateres automatisk når analysen er ferdig.')
-      onImportComplete?.()
-      window.setTimeout(() => onImportComplete?.(), 8000)
-      window.setTimeout(() => onImportComplete?.(), 18000)
+      const queuedJobId = typeof payload?.job_id === 'string' ? payload.job_id : ''
+      if (!queuedJobId) {
+        throw new Error('Importen startet, men mangler job-id for statussporing.')
+      }
+
+      setStatusMessage('Rapport i kø. Venter på prosessering...')
+      setActiveJobId(queuedJobId)
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error))
       setStatusMessage(null)
     } finally {
       setUploading(false)
     }
-  }, [maxSizeBytes, onImportComplete])
+  }, [isBusy, maxSizeBytes])
 
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
-    if (uploading) return
+    if (isBusy) return
     setIsDragging(true)
   }
 
@@ -2350,14 +2465,14 @@ function DropZone({ onImportComplete }: { onImportComplete?: () => void }) {
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(false)
-    if (uploading) return
+    if (isBusy) return
     const droppedFile = event.dataTransfer.files?.[0]
     if (!droppedFile) return
     void queueMarketReport(droppedFile)
   }
 
   const onSelectFile = () => {
-    if (uploading) return
+    if (isBusy) return
 
     const input = document.createElement('input')
     input.type = 'file'
@@ -2383,10 +2498,12 @@ function DropZone({ onImportComplete }: { onImportComplete?: () => void }) {
       onClick={onSelectFile}
     >
       <div className="font-mono text-[var(--csub-gold)] text-base">
-        {uploading ? 'Laster opp markedsrapport...' : 'Slipp PDF her eller klikk for opplasting'}
+        {uploading ? 'Laster opp markedsrapport...' : activeJobId ? 'Genererer markedsrapport med AI...' : 'Slipp PDF her eller klikk for opplasting'}
       </div>
       <div className="text-xs mt-2 text-[var(--text-muted)]">
-        {statusMessage || 'PDF analyseres med AI, forecasts og nøkkeltall oppdateres automatisk.'}
+        {statusMessage || (activeJobId
+          ? 'Rapporten behandles. Dashboard oppdateres automatisk når den er ferdig.'
+          : 'PDF analyseres med AI, forecasts og nøkkeltall oppdateres automatisk.')}
       </div>
       {errorMessage && <div className="mt-3 text-xs text-red-400">{errorMessage}</div>}
     </div>

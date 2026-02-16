@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server'
 import { requireAllowedApiUser } from '@/lib/auth/require-user'
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await requireAllowedApiUser()
   if (!auth.ok) return auth.response
 
   const supabase = auth.supabase
-  const { data, error } = await supabase
+  const url = new URL(request.url)
+  const jobId = url.searchParams.get('job_id')?.trim() || null
+
+  let query = supabase
     .from('import_jobs')
     .select(`
       id,
@@ -22,7 +25,14 @@ export async function GET() {
       import_batch_id
     `)
     .order('created_at', { ascending: false })
-    .limit(40)
+
+  if (jobId) {
+    query = query.eq('id', jobId).limit(1)
+  } else {
+    query = query.limit(40)
+  }
+
+  const { data, error } = await query
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
