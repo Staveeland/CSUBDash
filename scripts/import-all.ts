@@ -258,7 +258,7 @@ async function processExcel(fileName: string) {
     ...allAwards.map(r => ({ ...r, _type: 'award' })),
   ]
 
-  for (const row of tagged) {
+  for (const row of tagged as any[]) {
     const key = `${row.development_project}|${row.asset}|${row.country}`
     if (!projectMap.has(key)) {
       projectMap.set(key, {
