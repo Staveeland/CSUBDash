@@ -2275,10 +2275,6 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </div>
         </section>
 
-        <section>
-          <AIAgentPanel />
-        </section>
-
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6">
           {summaryKpis.map((kpi) => (
             <button
@@ -3216,6 +3212,8 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </>
         )}
       </div>
+
+      <AIAgentPanel />
     </div>
   )
 }

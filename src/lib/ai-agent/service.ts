@@ -302,6 +302,24 @@ function toSlug(input: string): string {
   return cleaned.slice(0, 64) || 'csub-report'
 }
 
+function toPlainChatText(input: string): string {
+  return input
+    .replace(/\r\n/g, '\n')
+    .replace(/```[a-z0-9_-]*\n?/gi, '')
+    .replace(/```/g, '')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/^>\s?/gm, '')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/^\s*[-*]\s+/gm, '- ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function formatDateForHumans(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
@@ -1007,11 +1025,16 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
 }
 
 function coerceAgentOutput(raw: Record<string, unknown>, fallbackAnswer: string): ModelAgentOutput {
-  const answerMarkdown = asString(raw.answer_markdown || raw.answerMarkdown, fallbackAnswer)
+  const answerMarkdown = toPlainChatText(
+    asString(raw.answer_text || raw.answer_markdown || raw.answerMarkdown, fallbackAnswer)
+  )
   const reportTitle = asString(raw.report_title || raw.reportTitle) || null
   const reportMarkdown = asString(raw.report_markdown || raw.reportMarkdown) || null
   const reportSummary = asString(raw.report_summary || raw.reportSummary) || null
-  const followUps = parseStringArray(raw.follow_up_suggestions || raw.followUps).slice(0, 4)
+  const followUps = parseStringArray(raw.follow_up_suggestions || raw.followUps)
+    .map((value) => toPlainChatText(value))
+    .filter((value) => value.length > 0)
+    .slice(0, 4)
 
   return {
     answerMarkdown,
@@ -1129,7 +1152,7 @@ async function generateAgentOutput(
     'Use ONLY the provided context JSON. Do not fabricate values.',
     'Return exactly one JSON object with this schema:',
     '{',
-    '  "answer_markdown": "string",',
+    '  "answer_text": "string",',
     '  "report_title": "string or null",',
     '  "report_markdown": "string or null",',
     '  "report_summary": "string or null",',
@@ -1138,6 +1161,7 @@ async function generateAgentOutput(
     'Rules:',
     '- If context lacks requested data, explicitly state the gap.',
     '- Use concrete dates/years in statements.',
+    '- answer_text must be plain text only. No markdown syntax such as **, #, _, backticks, or tables.',
     '- If plan.intent=report, report_markdown must be a complete structured report with sections and bullet points.',
     '- If plan.intent=question, keep report_markdown null unless user explicitly asks for PDF/report.',
     '- Language must match plan.language (no = Norwegian Bokmal, en = English).',
