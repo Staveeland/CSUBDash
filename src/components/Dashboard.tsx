@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNo
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
+import AIAgentPanel from './AIAgentPanel'
 import {
   Area,
   AreaChart,
@@ -2272,6 +2273,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               </select>
             </div>
           </div>
+        </section>
+
+        <section>
+          <AIAgentPanel />
         </section>
 
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6">
