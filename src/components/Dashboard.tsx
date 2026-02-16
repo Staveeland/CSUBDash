@@ -95,6 +95,14 @@ interface ActivityItem {
   meta: string
 }
 
+type TableSortDirection = 'asc' | 'desc'
+type TableSortKey = 'project' | 'country' | 'operator' | 'contractor' | 'depth' | 'xmt' | 'surf'
+
+interface TableSortConfig {
+  key: TableSortKey
+  direction: TableSortDirection
+}
+
 interface MetricTrend {
   latest: ForecastRecord | null
   previous: ForecastRecord | null
@@ -115,6 +123,16 @@ const DONUT_COLORS = ['#4db89e', '#38917f', '#2d7368', '#c9a84c', '#7dd4bf', '#2
 const REGION_COLORS = ['#5f87a8', '#7ea18b', '#b08f68', '#827fba', '#9f768f', '#6b9f9c']
 const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3c34']
 const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
+const DEFAULT_TABLE_ROWS = 15
+const TABLE_COLUMNS: { key: TableSortKey; label: string; align?: 'left' | 'right' }[] = [
+  { key: 'project', label: 'Prosjekt' },
+  { key: 'country', label: 'Land' },
+  { key: 'operator', label: 'Operatør' },
+  { key: 'contractor', label: 'SURF Contractor' },
+  { key: 'depth', label: 'Vanndybde' },
+  { key: 'xmt', label: 'XMTs', align: 'right' },
+  { key: 'surf', label: 'SURF km', align: 'right' },
+]
 
 const REGION_KEYS = [
   { key: 'europe_subsea_spend_total_usd_bn', label: 'Europe' },
@@ -353,6 +371,49 @@ function getProjectYear(project: Project): number | null {
 function buildProjectKey(project: Project): string {
   const raw = `${project.development_project || project.asset || 'project'}-${project.country || 'country'}-${project.first_year || project.last_year || 'year'}-${project.operator || 'operator'}`
   return raw.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+}
+
+function getTableSortValue(project: Project, key: TableSortKey): string | number {
+  switch (key) {
+    case 'project':
+      return normalize(project.development_project || project.asset || '')
+    case 'country':
+      return normalize(project.country)
+    case 'operator':
+      return normalize(project.operator)
+    case 'contractor':
+      return normalize(project.surf_contractor)
+    case 'depth':
+      return normalize(project.water_depth_category)
+    case 'xmt':
+      return Number(project.xmt_count || 0)
+    case 'surf':
+      return Number(project.surf_km || 0)
+    default:
+      return ''
+  }
+}
+
+function compareProjectsForSort(a: Project, b: Project, sort: TableSortConfig): number {
+  const left = getTableSortValue(a, sort.key)
+  const right = getTableSortValue(b, sort.key)
+
+  if (typeof left === 'number' && typeof right === 'number') {
+    const base = left - right
+    if (base === 0) return 0
+    return sort.direction === 'asc' ? base : -base
+  }
+
+  const leftText = String(left)
+  const rightText = String(right)
+  const base = leftText.localeCompare(rightText, 'nb', { sensitivity: 'base', numeric: true })
+  if (base === 0) return 0
+  return sort.direction === 'asc' ? base : -base
+}
+
+function getTableSortIndicator(sort: TableSortConfig | null, key: TableSortKey): string {
+  if (!sort || sort.key !== key) return ''
+  return sort.direction === 'asc' ? 'ASC' : 'DESC'
 }
 
 function getUserDisplayName(email: string | undefined): string {
@@ -673,6 +734,8 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [lang, setLang] = useState<'no' | 'en'>('no')
   const [region, setRegion] = useState<RegionFilter>('All')
   const [view, setView] = useState<DashboardView>('historical')
+  const [tableSort, setTableSort] = useState<TableSortConfig | null>(null)
+  const [showAllTableRows, setShowAllTableRows] = useState(false)
 
   // Market Intelligence state
   const [forecasts, setForecasts] = useState<ForecastRecord[]>([])
@@ -714,6 +777,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     const timeout = window.setTimeout(() => setHighlightedProjectKey(null), 2500)
     return () => window.clearTimeout(timeout)
   }, [highlightedProjectKey])
+
+  useEffect(() => {
+    setShowAllTableRows(false)
+  }, [searchQuery, region, view])
 
   const fetchMarketData = useCallback(async () => {
     setMarketLoading(true)
@@ -1067,6 +1134,26 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     )
   }, [viewProjects, searchQuery])
 
+  const sortedProjects = useMemo(() => {
+    if (!tableSort) return filteredProjects
+
+    return filteredProjects
+      .map((project, index) => ({ project, index }))
+      .sort((a, b) => {
+        const primary = compareProjectsForSort(a.project, b.project, tableSort)
+        if (primary !== 0) return primary
+        return a.index - b.index
+      })
+      .map((item) => item.project)
+  }, [filteredProjects, tableSort])
+
+  const visibleProjects = useMemo(() => {
+    if (showAllTableRows) return sortedProjects
+    return sortedProjects.slice(0, DEFAULT_TABLE_ROWS)
+  }, [showAllTableRows, sortedProjects])
+
+  const hasMoreTableRows = sortedProjects.length > DEFAULT_TABLE_ROWS
+
   const liveSearchResults = useMemo(() => {
     const trimmed = searchQuery.trim()
     if (!trimmed) return []
@@ -1143,9 +1230,22 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     setDrawerOpen(true)
   }
 
+  const handleTableSort = (key: TableSortKey) => {
+    setTableSort((current) => {
+      if (!current || current.key !== key) {
+        return { key, direction: 'asc' }
+      }
+      if (current.direction === 'asc') {
+        return { key, direction: 'desc' }
+      }
+      return null
+    })
+  }
+
   const openFromSearch = (project: Project) => {
     const projectKey = buildProjectKey(project)
     setHighlightedProjectKey(projectKey)
+    setShowAllTableRows(true)
     setSearchQuery(project.development_project || project.asset || '')
     openDrawer(project)
     window.requestAnimationFrame(() => {
@@ -1482,18 +1582,38 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         </section>
 
         <section className="bg-[var(--csub-dark)] rounded-xl border border-[var(--csub-light-soft)] overflow-hidden mt-6 shadow-lg">
-          <div className="px-6 py-5 border-b border-[var(--csub-light-faint)]">
+          <div className="px-6 py-5 border-b border-[var(--csub-light-faint)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <h2 className="text-lg text-white">{view === 'historical' ? 'Historisk kontraktoversikt' : 'Kommende prosjektoversikt'}</h2>
+            <p className="text-xs text-[var(--text-muted)]">
+              Viser {visibleProjects.length.toLocaleString('en-US')} av {sortedProjects.length.toLocaleString('en-US')}
+            </p>
           </div>
           <div className="overflow-x-auto w-full">
             <table className="w-full min-w-[700px] text-left text-sm whitespace-nowrap">
               <thead>
                 <tr className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
-                  {['Prosjekt', 'Land', 'Operatør', 'SURF Contractor', 'Vanndybde', 'XMTs', 'SURF km'].map((header) => (
-                    <th key={header} className="px-4 py-3 border-b border-[var(--csub-light-faint)] font-semibold">
-                      {header}
-                    </th>
-                  ))}
+                  {TABLE_COLUMNS.map((column) => {
+                    const sortIndicator = getTableSortIndicator(tableSort, column.key)
+                    const isActive = tableSort?.key === column.key
+
+                    return (
+                      <th
+                        key={column.key}
+                        className={`px-4 py-3 border-b border-[var(--csub-light-faint)] font-semibold ${column.align === 'right' ? 'text-right' : 'text-left'}`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleTableSort(column.key)}
+                          className={`inline-flex items-center gap-2 transition-colors cursor-pointer ${isActive ? 'text-[var(--csub-light)]' : 'hover:text-white'}`}
+                        >
+                          <span>{column.label}</span>
+                          <span className={`text-[10px] font-mono ${isActive ? 'text-[var(--csub-gold)]' : 'text-[var(--text-muted)]'}`}>
+                            {sortIndicator || 'SORT'}
+                          </span>
+                        </button>
+                      </th>
+                    )
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -1503,14 +1623,14 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                       <LoadingPlaceholder />
                     </td>
                   </tr>
-                ) : filteredProjects.length === 0 ? (
+                ) : sortedProjects.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-6 text-center text-[var(--text-muted)]">
                       Ingen data for valgt filter
                     </td>
                   </tr>
                 ) : (
-                  filteredProjects.slice(0, 50).map((project, index) => {
+                  visibleProjects.map((project, index) => {
                     const projectKey = buildProjectKey(project)
                     const isHighlighted = highlightedProjectKey === projectKey
                     return (
@@ -1528,8 +1648,8 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                         <td className="px-4 py-3 text-[var(--text-muted)]">{project.operator || '—'}</td>
                         <td className="px-4 py-3 text-[var(--text-muted)]">{project.surf_contractor || '—'}</td>
                         <td className="px-4 py-3 font-mono text-white">{project.water_depth_category || '—'}</td>
-                        <td className="px-4 py-3 font-mono text-white">{(project.xmt_count || 0).toLocaleString('en-US')}</td>
-                        <td className="px-4 py-3 font-mono text-white">{Math.round(project.surf_km || 0).toLocaleString('en-US')}</td>
+                        <td className="px-4 py-3 font-mono text-white text-right">{(project.xmt_count || 0).toLocaleString('en-US')}</td>
+                        <td className="px-4 py-3 font-mono text-white text-right">{Math.round(project.surf_km || 0).toLocaleString('en-US')}</td>
                       </tr>
                     )
                   })
@@ -1537,6 +1657,17 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               </tbody>
             </table>
           </div>
+          {!loading && sortedProjects.length > 0 && hasMoreTableRows && (
+            <div className="px-4 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowAllTableRows((current) => !current)}
+                className="w-full rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-4 py-2.5 text-sm text-[var(--csub-light)] hover:text-white hover:border-[var(--csub-gold-soft)] transition-colors cursor-pointer"
+              >
+                {showAllTableRows ? 'Vis mindre' : `Vis mer (${(sortedProjects.length - DEFAULT_TABLE_ROWS).toLocaleString('en-US')})`}
+              </button>
+            </div>
+          )}
           <div className="m-4 flex items-center gap-2 rounded-lg border border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.08)] px-4 py-3 text-xs text-[var(--text-muted)]">
             AI-vurdering: verifiser alltid output manuelt.
           </div>
