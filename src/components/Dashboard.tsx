@@ -124,14 +124,14 @@ const REGION_COLORS = ['#5f87a8', '#7ea18b', '#b08f68', '#827fba', '#9f768f', '#
 const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3c34']
 const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
 const DEFAULT_TABLE_ROWS = 15
-const TABLE_COLUMNS: { key: TableSortKey; label: string; align?: 'left' | 'right' }[] = [
-  { key: 'project', label: 'Prosjekt' },
-  { key: 'country', label: 'Land' },
-  { key: 'operator', label: 'Operatør' },
-  { key: 'contractor', label: 'SURF Contractor' },
-  { key: 'depth', label: 'Vanndybde' },
-  { key: 'xmt', label: 'XMTs', align: 'right' },
-  { key: 'surf', label: 'SURF km', align: 'right' },
+const TABLE_COLUMNS: { key: TableSortKey; label: string; align?: 'left' | 'right'; width: string }[] = [
+  { key: 'project', label: 'Prosjekt', width: '23%' },
+  { key: 'country', label: 'Land', width: '12%' },
+  { key: 'operator', label: 'Operatør', width: '16%' },
+  { key: 'contractor', label: 'SURF Contractor', width: '16%' },
+  { key: 'depth', label: 'Vanndybde', width: '14%' },
+  { key: 'xmt', label: 'XMTs', align: 'right', width: '9%' },
+  { key: 'surf', label: 'SURF km', align: 'right', width: '10%' },
 ]
 
 const REGION_KEYS = [
@@ -1589,7 +1589,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             </p>
           </div>
           <div className="overflow-x-auto w-full">
-            <table className="w-full min-w-[700px] text-left text-sm whitespace-nowrap">
+            <table className="w-full min-w-[980px] table-fixed text-left text-sm whitespace-nowrap">
+              <colgroup>
+                {TABLE_COLUMNS.map((column) => (
+                  <col key={`col-${column.key}`} style={{ width: column.width }} />
+                ))}
+              </colgroup>
               <thead>
                 <tr className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
                   {TABLE_COLUMNS.map((column) => {
@@ -1604,10 +1609,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                         <button
                           type="button"
                           onClick={() => handleTableSort(column.key)}
-                          className={`inline-flex items-center gap-2 transition-colors cursor-pointer ${isActive ? 'text-[var(--csub-light)]' : 'hover:text-white'}`}
+                          className={`w-full inline-flex items-center ${column.align === 'right' ? 'justify-end' : 'justify-between'} gap-2 transition-colors cursor-pointer ${isActive ? 'text-[var(--csub-light)]' : 'hover:text-white'}`}
                         >
-                          <span>{column.label}</span>
-                          <span className={`text-[10px] font-mono ${isActive ? 'text-[var(--csub-gold)]' : 'text-[var(--text-muted)]'}`}>
+                          <span className="truncate">{column.label}</span>
+                          <span className={`inline-flex w-10 shrink-0 justify-end text-[10px] font-mono ${isActive ? 'text-[var(--csub-gold)]' : 'text-[var(--text-muted)]'}`}>
                             {sortIndicator || 'SORT'}
                           </span>
                         </button>
@@ -1643,13 +1648,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                         }}
                         className={`cursor-pointer transition-colors border-b border-[var(--csub-light-faint)] ${isHighlighted ? 'bg-[color:rgba(77,184,158,0.16)]' : 'hover:bg-[color:rgba(77,184,158,0.08)]'}`}
                       >
-                        <td className="px-4 py-3 font-semibold text-white">{project.development_project || '—'}</td>
-                        <td className="px-4 py-3 text-[var(--text-muted)]">{project.country || '—'}</td>
-                        <td className="px-4 py-3 text-[var(--text-muted)]">{project.operator || '—'}</td>
-                        <td className="px-4 py-3 text-[var(--text-muted)]">{project.surf_contractor || '—'}</td>
-                        <td className="px-4 py-3 font-mono text-white">{project.water_depth_category || '—'}</td>
-                        <td className="px-4 py-3 font-mono text-white text-right">{(project.xmt_count || 0).toLocaleString('en-US')}</td>
-                        <td className="px-4 py-3 font-mono text-white text-right">{Math.round(project.surf_km || 0).toLocaleString('en-US')}</td>
+                        <td className="px-4 py-3 font-semibold text-white max-w-0 truncate">{project.development_project || '—'}</td>
+                        <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.country || '—'}</td>
+                        <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.operator || '—'}</td>
+                        <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.surf_contractor || '—'}</td>
+                        <td className="px-4 py-3 font-mono text-white max-w-0 truncate">{project.water_depth_category || '—'}</td>
+                        <td className="px-4 py-3 font-mono text-white text-right tabular-nums">{(project.xmt_count || 0).toLocaleString('en-US')}</td>
+                        <td className="px-4 py-3 font-mono text-white text-right tabular-nums">{Math.round(project.surf_km || 0).toLocaleString('en-US')}</td>
                       </tr>
                     )
                   })
