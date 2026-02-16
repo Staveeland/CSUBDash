@@ -21,9 +21,11 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
 
 interface Props {
   countryData: { country: string; count: number }[]
+  onCountrySelect?: (country: string) => void
+  activeCountry?: string | null
 }
 
-export default function MapSection({ countryData }: Props) {
+export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
 
   return (
@@ -42,24 +44,36 @@ export default function MapSection({ countryData }: Props) {
         {countryData.map((entry) => {
           const coords = COUNTRY_COORDS[entry.country]
           if (!coords) return null
-          const radius = Math.max(6, Math.sqrt(entry.count / maxCount) * 30)
+          const isActive = (activeCountry ?? '').trim().toLowerCase() === entry.country.trim().toLowerCase()
+          const radius = Math.max(6, Math.sqrt(entry.count / maxCount) * 30) + (isActive ? 2 : 0)
           return (
             <CircleMarker
               key={entry.country}
               center={coords}
               radius={radius}
+              eventHandlers={{
+                click: () => {
+                  onCountrySelect?.(entry.country)
+                },
+              }}
               pathOptions={{
-                fillColor: '#4db89e',
-                color: '#0e2620',
+                fillColor: isActive ? '#c9a84c' : '#4db89e',
+                color: isActive ? '#3d3212' : '#0e2620',
                 weight: 1.5,
                 opacity: 0.9,
-                fillOpacity: 0.6,
+                fillOpacity: isActive ? 0.85 : 0.6,
               }}
             >
               <Popup>
                 <strong>{entry.country}</strong>
                 <br />
                 {entry.count} prosjekter
+                {onCountrySelect && (
+                  <>
+                    <br />
+                    Klikk for detaljer
+                  </>
+                )}
               </Popup>
             </CircleMarker>
           )

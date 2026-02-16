@@ -119,6 +119,60 @@ interface PreparedReport {
   salesActions: string[]
 }
 
+type InsightValueFormat = 'count' | 'currencyMillions' | 'currencyBillions' | 'km' | 'percent' | 'raw'
+type InsightChartKind = 'bar' | 'area'
+type InsightSource = 'projects' | 'market' | 'reports'
+type SummaryKpiKey = 'totalProjects' | 'totalSurfKm' | 'totalXmts' | 'upcomingAwards' | 'regions'
+type MarketMetricKey = 'spend' | 'xmt' | 'surf' | 'growth' | 'brent'
+
+interface InsightMetricItem {
+  label: string
+  value: string
+  tone?: 'up' | 'down' | 'neutral'
+}
+
+interface InsightChartItem {
+  label: string
+  value: number
+}
+
+interface InsightListItem {
+  label: string
+  value: string
+  detail?: string
+}
+
+interface InsightState {
+  id: string
+  title: string
+  subtitle?: string
+  description?: string
+  source: InsightSource
+  metrics: InsightMetricItem[]
+  chartTitle?: string
+  chartKind?: InsightChartKind
+  chartFormat?: InsightValueFormat
+  chartData?: InsightChartItem[]
+  listTitle?: string
+  listItems?: InsightListItem[]
+  projects?: Project[]
+}
+
+interface ProjectInsightOptions {
+  id: string
+  title: string
+  subtitle?: string
+  description?: string
+  selectedProjects: Project[]
+  chartTitle?: string
+  chartKind?: InsightChartKind
+  chartFormat?: InsightValueFormat
+  chartData?: InsightChartItem[]
+  listTitle?: string
+  listItems?: InsightListItem[]
+  extraMetrics?: InsightMetricItem[]
+}
+
 const DONUT_COLORS = ['#4db89e', '#38917f', '#2d7368', '#c9a84c', '#7dd4bf', '#245a4e']
 const REGION_COLORS = ['#5f87a8', '#7ea18b', '#b08f68', '#827fba', '#9f768f', '#6b9f9c']
 const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3c34']
@@ -513,6 +567,64 @@ function formatMillions(value: number): string {
   return `$${(value / 1_000_000).toFixed(1)}M`
 }
 
+function formatBillions(value: number): string {
+  return `$${value.toFixed(1)}B`
+}
+
+function formatPercent(value: number): string {
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`
+}
+
+function getProjectDisplayName(project: Project): string {
+  return project.development_project || project.asset || 'Ukjent prosjekt'
+}
+
+function estimateProjectValue(project: Project): number {
+  const surfValue = Math.max(0, project.surf_km || 0) * 1_000_000
+  const xmtValue = Math.max(0, project.xmt_count || 0) * 120_000
+  return surfValue + xmtValue
+}
+
+function formatInsightValue(value: number, format: InsightValueFormat): string {
+  if (!Number.isFinite(value)) return '—'
+
+  switch (format) {
+    case 'count':
+      return Math.round(value).toLocaleString('en-US')
+    case 'currencyMillions':
+      return formatMillions(value)
+    case 'currencyBillions':
+      return formatBillions(value)
+    case 'km':
+      return `${Math.round(value).toLocaleString('en-US')} km`
+    case 'percent':
+      return `${value.toFixed(1)}%`
+    case 'raw':
+    default:
+      return value.toLocaleString('en-US')
+  }
+}
+
+function aggregateProjectMetric(
+  source: Project[],
+  keySelector: (project: Project) => string,
+  valueSelector: (project: Project) => number
+): Array<{ label: string; value: number }> {
+  const map = new Map<string, number>()
+
+  source.forEach((project) => {
+    const key = keySelector(project).trim()
+    if (!key) return
+    const value = valueSelector(project)
+    if (!Number.isFinite(value) || value <= 0) return
+    map.set(key, (map.get(key) ?? 0) + value)
+  })
+
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+}
+
 interface ParsedReport {
   title: string | null
   highlights: string[]
@@ -736,6 +848,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [view, setView] = useState<DashboardView>('historical')
   const [tableSort, setTableSort] = useState<TableSortConfig | null>(null)
   const [showAllTableRows, setShowAllTableRows] = useState(false)
+  const [insight, setInsight] = useState<InsightState | null>(null)
 
   // Market Intelligence state
   const [forecasts, setForecasts] = useState<ForecastRecord[]>([])
@@ -785,6 +898,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   useEffect(() => {
     setShowAllTableRows(false)
   }, [searchQuery, region, view])
+
+  useEffect(() => {
+    setInsight(null)
+  }, [region, view])
 
   const fetchMarketData = useCallback(async () => {
     setMarketLoading(true)
@@ -1073,6 +1190,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
     return [
       {
+        metricKey: 'spend' as MarketMetricKey,
         label: 'Total Subsea Spend',
         source: 'Market Reports',
         data: latestMetrics.spend,
@@ -1081,6 +1199,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         trendTone: getTrendTone(spendTrend.delta),
       },
       {
+        metricKey: 'xmt' as MarketMetricKey,
         label: 'XMT Installations',
         source: 'Market Reports',
         data: latestMetrics.xmt,
@@ -1089,6 +1208,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         trendTone: getTrendTone(xmtTrend.delta),
       },
       {
+        metricKey: 'surf' as MarketMetricKey,
         label: 'SURF km',
         source: 'Market Reports',
         data: latestMetrics.surf,
@@ -1097,6 +1217,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         trendTone: getTrendTone(surfTrend.delta),
       },
       {
+        metricKey: 'growth' as MarketMetricKey,
         label: 'YoY Growth',
         source: 'Market Reports',
         data: latestMetrics.growth,
@@ -1105,6 +1226,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         trendTone: getTrendTone(growthTrend.delta),
       },
       {
+        metricKey: 'brent' as MarketMetricKey,
         label: 'Brent Oil Price',
         source: 'Market Reports',
         data: latestMetrics.brent,
@@ -1241,6 +1363,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   }, [filteredProjects])
 
   const openDrawer = (project: Project) => {
+    setInsight(null)
     setSelectedProject(project)
     setDrawerOpen(true)
   }
@@ -1307,6 +1430,722 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const regionalTotal = regionalSummary?.total ?? 0
   const regionalYoyDelta = regionalSummary?.yoyDelta ?? null
   const regionalTopRegion = regionalSummary?.topRegion ?? null
+  const reportTimelineData = useMemo(() => {
+    const yearMap = new Map<number, number>()
+    reports.forEach((report) => {
+      const parsedDate = new Date(report.created_at)
+      if (Number.isNaN(parsedDate.getTime())) return
+      const year = parsedDate.getFullYear()
+      yearMap.set(year, (yearMap.get(year) ?? 0) + 1)
+    })
+    return Array.from(yearMap.entries())
+      .map(([year, count]) => ({ label: String(year), value: count }))
+      .sort((a, b) => Number(a.label) - Number(b.label))
+  }, [reports])
+
+  const summaryKpis: Array<{ key: SummaryKpiKey; label: string; value: string }> = [
+    { key: 'totalProjects', label: 'Total poster', value: loading ? '—' : computedStats.totalProjects.toLocaleString('en-US') },
+    { key: 'totalSurfKm', label: 'Total SURF km', value: loading ? '—' : `${computedStats.totalSurfKm.toLocaleString('en-US')} km` },
+    { key: 'totalXmts', label: 'Total XMTs', value: loading ? '—' : computedStats.totalXmts.toLocaleString('en-US') },
+    {
+      key: 'upcomingAwards',
+      label: view === 'historical' ? 'Awards siste 12m' : 'Kommende prosjekter',
+      value: loading ? '—' : computedStats.upcomingAwards.toLocaleString('en-US'),
+    },
+    { key: 'regions', label: 'Regioner', value: loading ? '—' : computedStats.regionCount.toLocaleString('en-US') },
+  ]
+
+  const openInsightPanel = (next: InsightState) => {
+    setDrawerOpen(false)
+    setSelectedProject(null)
+    setInsight(next)
+  }
+
+  const closeInsightPanel = () => {
+    setInsight(null)
+  }
+
+  const openProjectFromInsight = (project: Project) => {
+    setInsight(null)
+    setSelectedProject(project)
+    setDrawerOpen(true)
+  }
+
+  const buildProjectInsight = ({
+    id,
+    title,
+    subtitle,
+    description,
+    selectedProjects,
+    chartTitle,
+    chartKind = 'bar',
+    chartFormat = 'count',
+    chartData = [],
+    listTitle,
+    listItems = [],
+    extraMetrics = [],
+  }: ProjectInsightOptions) => {
+    const surfTotal = selectedProjects.reduce((sum, project) => sum + (project.surf_km || 0), 0)
+    const xmtTotal = selectedProjects.reduce((sum, project) => sum + (project.xmt_count || 0), 0)
+    const coveragePct = viewProjects.length > 0 ? (selectedProjects.length / viewProjects.length) * 100 : 0
+
+    openInsightPanel({
+      id,
+      title,
+      subtitle,
+      description,
+      source: 'projects',
+      metrics: [
+        { label: 'Treff', value: selectedProjects.length.toLocaleString('en-US') },
+        { label: 'Andel av view', value: `${coveragePct.toFixed(1)}%` },
+        { label: 'SURF km', value: `${Math.round(surfTotal).toLocaleString('en-US')} km` },
+        { label: 'XMTs', value: Math.round(xmtTotal).toLocaleString('en-US') },
+        ...extraMetrics,
+      ],
+      chartTitle,
+      chartKind,
+      chartFormat,
+      chartData,
+      listTitle,
+      listItems,
+      projects: selectedProjects,
+    })
+  }
+
+  const getProjectsByYear = (year: number): Project[] => (
+    viewProjects.filter((project) => getProjectYear(project) === year)
+  )
+
+  const openSummaryKpiInsight = (key: SummaryKpiKey) => {
+    if (loading) return
+
+    if (key === 'totalProjects') {
+      const uniqueOperators = new Set(viewProjects.map((project) => normalize(project.operator)).filter(Boolean)).size
+      const uniqueContractors = new Set(viewProjects.map((project) => normalize(project.surf_contractor)).filter(Boolean)).size
+      buildProjectInsight({
+        id: 'summary-total-projects',
+        title: 'Total poster',
+        subtitle: `${computedStats.totalProjects.toLocaleString('en-US')} aktive poster`,
+        description: 'Prosjektlisten under viser alle treff i valgt view og region.',
+        selectedProjects: viewProjects,
+        chartTitle: 'Prosjekter per år',
+        chartKind: 'area',
+        chartFormat: 'count',
+        chartData: viewCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+        listTitle: 'Største land',
+        listItems: viewCharts.byCountry.slice(0, 10).map((item) => ({
+          label: item.country,
+          value: item.count.toLocaleString('en-US'),
+          detail: `${((item.count / Math.max(viewProjects.length, 1)) * 100).toFixed(1)}% av view`,
+        })),
+        extraMetrics: [
+          { label: 'Operatører', value: uniqueOperators.toLocaleString('en-US') },
+          { label: 'Contractors', value: uniqueContractors.toLocaleString('en-US') },
+        ],
+      })
+      return
+    }
+
+    if (key === 'totalSurfKm') {
+      const projectsWithSurf = viewProjects.filter((project) => (project.surf_km || 0) > 0)
+      const topContractors = aggregateProjectMetric(
+        projectsWithSurf,
+        (project) => project.surf_contractor || 'Ukjent contractor',
+        (project) => project.surf_km || 0
+      ).slice(0, 10)
+      const topProjects = [...projectsWithSurf]
+        .sort((a, b) => (b.surf_km || 0) - (a.surf_km || 0))
+        .slice(0, 10)
+
+      buildProjectInsight({
+        id: 'summary-surf-km',
+        title: 'Total SURF km',
+        subtitle: `${computedStats.totalSurfKm.toLocaleString('en-US')} km`,
+        description: 'Viser hvor SURF-omfanget faktisk ligger på prosjekt- og contractor-nivå.',
+        selectedProjects: projectsWithSurf,
+        chartTitle: 'Største prosjekt etter SURF km',
+        chartFormat: 'km',
+        chartData: topProjects.map((project) => ({
+          label: getProjectDisplayName(project),
+          value: project.surf_km || 0,
+        })),
+        listTitle: 'Contractors med høyest SURF-volum',
+        listItems: topContractors.map((item) => ({
+          label: item.label,
+          value: `${Math.round(item.value).toLocaleString('en-US')} km`,
+        })),
+        extraMetrics: [
+          {
+            label: 'Snitt per prosjekt',
+            value: projectsWithSurf.length ? `${Math.round(computedStats.totalSurfKm / projectsWithSurf.length)} km` : '0 km',
+          },
+        ],
+      })
+      return
+    }
+
+    if (key === 'totalXmts') {
+      const projectsWithXmt = viewProjects.filter((project) => (project.xmt_count || 0) > 0)
+      const topOperators = aggregateProjectMetric(
+        projectsWithXmt,
+        (project) => project.operator || 'Ukjent operatør',
+        (project) => project.xmt_count || 0
+      ).slice(0, 10)
+      const topProjects = [...projectsWithXmt]
+        .sort((a, b) => (b.xmt_count || 0) - (a.xmt_count || 0))
+        .slice(0, 10)
+
+      buildProjectInsight({
+        id: 'summary-xmts',
+        title: 'Total XMTs',
+        subtitle: computedStats.totalXmts.toLocaleString('en-US'),
+        description: 'XMT-fordeling fordelt på prosjekter og operatører.',
+        selectedProjects: projectsWithXmt,
+        chartTitle: 'Største prosjekt etter XMT',
+        chartFormat: 'count',
+        chartData: topProjects.map((project) => ({
+          label: getProjectDisplayName(project),
+          value: project.xmt_count || 0,
+        })),
+        listTitle: 'Operatører med høyest XMT-volum',
+        listItems: topOperators.map((item) => ({
+          label: item.label,
+          value: Math.round(item.value).toLocaleString('en-US'),
+        })),
+      })
+      return
+    }
+
+    if (key === 'upcomingAwards') {
+      const selectedProjects = viewProjects.filter((project) => {
+        const year = getProjectYear(project) || 0
+        if (view === 'historical') return year >= currentYear - 1 && year <= currentYear
+        return year >= currentYear
+      })
+      const selectedCharts = buildChartsFromProjects(selectedProjects)
+
+      buildProjectInsight({
+        id: 'summary-upcoming-awards',
+        title: view === 'historical' ? 'Awards siste 12 måneder' : 'Kommende prosjekter',
+        subtitle: `${selectedProjects.length.toLocaleString('en-US')} treff`,
+        description: 'Dette er den delen av prosjektbasen som faktisk ligger i nær tid.',
+        selectedProjects,
+        chartTitle: 'Fordeling per land',
+        chartFormat: 'count',
+        chartData: selectedCharts.byCountry.slice(0, 10).map((item) => ({ label: item.country, value: item.count })),
+        listTitle: 'Nærmeste prosjekter',
+        listItems: [...selectedProjects]
+          .sort((a, b) => (getProjectYear(a) ?? 9999) - (getProjectYear(b) ?? 9999))
+          .slice(0, 10)
+          .map((project) => ({
+            label: getProjectDisplayName(project),
+            value: String(getProjectYear(project) ?? '—'),
+            detail: `${project.country || 'Ukjent land'} • ${project.operator || project.surf_contractor || 'Ukjent aktør'}`,
+          })),
+      })
+      return
+    }
+
+    const continentMap = new Map<string, number>()
+    viewProjects.forEach((project) => {
+      const continent = project.continent || 'Ukjent region'
+      continentMap.set(continent, (continentMap.get(continent) ?? 0) + 1)
+    })
+
+    buildProjectInsight({
+      id: 'summary-regions',
+      title: 'Regioner',
+      subtitle: `${computedStats.regionCount.toLocaleString('en-US')} regioner i view`,
+      description: 'Bruk denne for rask oversikt over regional dekning.',
+      selectedProjects: viewProjects,
+      chartTitle: 'Land med høyest aktivitet',
+      chartFormat: 'count',
+      chartData: viewCharts.byCountry.slice(0, 12).map((item) => ({ label: item.country, value: item.count })),
+      listTitle: 'Kontinentfordeling',
+      listItems: Array.from(continentMap.entries())
+        .map(([label, value]) => ({ label, value }))
+        .sort((a, b) => b.value - a.value)
+        .map((item) => ({
+          label: item.label,
+          value: item.value.toLocaleString('en-US'),
+        })),
+      extraMetrics: [
+        { label: 'Land', value: viewCharts.byCountry.length.toLocaleString('en-US') },
+      ],
+    })
+  }
+
+  const openPipelineYearInsight = (period: string) => {
+    const year = Number(period)
+    if (!Number.isFinite(year)) return
+    const selectedProjects = getProjectsByYear(year)
+    const pipelinePoint = pipelineData.find((point) => point.period === period)
+    const phaseBreakdown = buildChartsFromProjects(selectedProjects).byPhase
+    const topProjects = [...selectedProjects]
+      .sort((a, b) => estimateProjectValue(b) - estimateProjectValue(a))
+      .slice(0, 10)
+
+    buildProjectInsight({
+      id: `pipeline-year-${year}`,
+      title: `Pipelineverdi ${year}`,
+      subtitle: pipelinePoint ? formatMillions(pipelinePoint.value) : `${selectedProjects.length} prosjekter`,
+      description: 'Klikk prosjekt i listen for full kontraktdetalj.',
+      selectedProjects,
+      chartTitle: 'Faser i valgt år',
+      chartFormat: 'count',
+      chartData: phaseBreakdown.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
+      listTitle: 'Prosjekter med høyest estimert verdi',
+      listItems: topProjects.map((project) => ({
+        label: getProjectDisplayName(project),
+        value: formatMillions(estimateProjectValue(project)),
+        detail: `${project.country || 'Ukjent land'} • ${project.operator || project.surf_contractor || 'Ukjent aktør'}`,
+      })),
+      extraMetrics: pipelinePoint
+        ? [{ label: 'Estimert verdi', value: formatMillions(pipelinePoint.value) }]
+        : [],
+    })
+  }
+
+  const openPipelinePhaseInsight = (phaseLabel: string) => {
+    const selectedProjects = phaseLabel === 'FEED'
+      ? viewProjects
+      : viewProjects.filter((project) => normalize(project.facility_category).includes(normalize(phaseLabel)))
+    const selectedCharts = buildChartsFromProjects(selectedProjects)
+
+    buildProjectInsight({
+      id: `pipeline-phase-${normalize(phaseLabel)}`,
+      title: `Pipelinefase: ${phaseLabel}`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      description: 'Viser hvordan denne fasen er fordelt over tid og geografi.',
+      selectedProjects,
+      chartTitle: 'Utvikling per år',
+      chartKind: 'area',
+      chartFormat: 'count',
+      chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+      listTitle: 'Største markeder i fasen',
+      listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
+        label: item.country,
+        value: item.count.toLocaleString('en-US'),
+      })),
+    })
+  }
+
+  const openPhaseInsight = (phase: string) => {
+    const selectedProjects = viewProjects.filter(
+      (project) => normalize(project.facility_category || 'Unknown') === normalize(phase)
+    )
+    const selectedCharts = buildChartsFromProjects(selectedProjects)
+
+    buildProjectInsight({
+      id: `phase-${normalize(phase)}`,
+      title: `Fase: ${phase}`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      selectedProjects,
+      chartTitle: 'Prosjekter per år',
+      chartKind: 'area',
+      chartFormat: 'count',
+      chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+      listTitle: 'Største land i fasen',
+      listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
+        label: item.country,
+        value: item.count.toLocaleString('en-US'),
+      })),
+    })
+  }
+
+  const openCountryInsight = (country: string) => {
+    const selectedProjects = viewProjects.filter((project) => normalize(project.country) === normalize(country))
+    const selectedCharts = buildChartsFromProjects(selectedProjects)
+
+    buildProjectInsight({
+      id: `country-${normalize(country)}`,
+      title: `Land: ${country}`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      selectedProjects,
+      chartTitle: 'Fasefordeling',
+      chartFormat: 'count',
+      chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
+      listTitle: 'Viktigste operatører',
+      listItems: aggregateProjectMetric(
+        selectedProjects,
+        (project) => project.operator || 'Ukjent operatør',
+        () => 1
+      )
+        .slice(0, 10)
+        .map((item) => ({
+          label: item.label,
+          value: Math.round(item.value).toLocaleString('en-US'),
+        })),
+    })
+  }
+
+  const openDepthInsight = (depth: string) => {
+    const selectedProjects = viewProjects.filter(
+      (project) => normalize(project.water_depth_category || 'Unknown') === normalize(depth)
+    )
+    const selectedCharts = buildChartsFromProjects(selectedProjects)
+
+    buildProjectInsight({
+      id: `depth-${normalize(depth)}`,
+      title: `Vanndybde: ${depth}`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      selectedProjects,
+      chartTitle: 'Prosjekter per år',
+      chartKind: 'area',
+      chartFormat: 'count',
+      chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+      listTitle: 'Største land for dybdekategorien',
+      listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
+        label: item.country,
+        value: item.count.toLocaleString('en-US'),
+      })),
+    })
+  }
+
+  const openContractorInsight = (contractor: string) => {
+    const selectedProjects = viewProjects.filter(
+      (project) => normalize(project.surf_contractor) === normalize(contractor)
+    )
+    const selectedCharts = buildChartsFromProjects(selectedProjects)
+
+    buildProjectInsight({
+      id: `contractor-${normalize(contractor)}`,
+      title: `Contractor: ${contractor}`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      selectedProjects,
+      chartTitle: 'Prosjekter per år',
+      chartKind: 'area',
+      chartFormat: 'count',
+      chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+      listTitle: 'Land der contractor er aktiv',
+      listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
+        label: item.country,
+        value: item.count.toLocaleString('en-US'),
+      })),
+      extraMetrics: [
+        {
+          label: 'Estimert verdi',
+          value: formatMillions(selectedProjects.reduce((sum, project) => sum + estimateProjectValue(project), 0)),
+        },
+      ],
+    })
+  }
+
+  const openOperatorInsight = (operator: string) => {
+    const selectedProjects = viewProjects.filter((project) => normalize(project.operator) === normalize(operator))
+    const selectedCharts = buildChartsFromProjects(selectedProjects)
+
+    buildProjectInsight({
+      id: `operator-${normalize(operator)}`,
+      title: `Operatør: ${operator}`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      selectedProjects,
+      chartTitle: 'Fasefordeling',
+      chartFormat: 'count',
+      chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
+      listTitle: 'Contractors i operatørporteføljen',
+      listItems: aggregateProjectMetric(
+        selectedProjects,
+        (project) => project.surf_contractor || 'Ukjent contractor',
+        () => 1
+      )
+        .slice(0, 10)
+        .map((item) => ({
+          label: item.label,
+          value: Math.round(item.value).toLocaleString('en-US'),
+        })),
+    })
+  }
+
+  const openYearInsight = (year: number) => {
+    const selectedProjects = getProjectsByYear(year)
+    const selectedCharts = buildChartsFromProjects(selectedProjects)
+
+    buildProjectInsight({
+      id: `year-${year}`,
+      title: `${year}: ${view === 'historical' ? 'Awards' : 'Prosjekter'}`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      selectedProjects,
+      chartTitle: 'Fasefordeling',
+      chartFormat: 'count',
+      chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
+      listTitle: 'Største land',
+      listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
+        label: item.country,
+        value: item.count.toLocaleString('en-US'),
+      })),
+    })
+  }
+
+  const openMarketMetricInsight = (metric: MarketMetricKey) => {
+    const metricConfig = {
+      spend: { label: 'Total Subsea Spend', series: spendingByYear, format: 'currencyBillions' as InsightValueFormat },
+      xmt: { label: 'XMT Installations', series: xmtByYear, format: 'count' as InsightValueFormat, suffix: 'units' },
+      surf: { label: 'SURF km', series: surfByYear, format: 'km' as InsightValueFormat },
+      growth: { label: 'YoY Growth', series: growthByYear, format: 'percent' as InsightValueFormat },
+      brent: { label: 'Brent Oil Price', series: brentByYear, format: 'raw' as InsightValueFormat, suffix: 'USD/bbl' },
+    }[metric]
+
+    if (!metricConfig || !metricConfig.series.length) return
+
+    const latest = metricConfig.series[metricConfig.series.length - 1]
+    const previous = metricConfig.series.length > 1 ? metricConfig.series[metricConfig.series.length - 2] : null
+    const delta = previous ? latest.value - previous.value : null
+    const linkedProjects = getProjectsByYear(latest.year)
+    const formatMetricValue = (value: number): string => {
+      const formatted = formatInsightValue(value, metricConfig.format)
+      return metricConfig.suffix ? `${formatted} ${metricConfig.suffix}` : formatted
+    }
+
+    openInsightPanel({
+      id: `market-metric-${metric}`,
+      title: metricConfig.label,
+      subtitle: `${metricConfig.series[0].year}-${metricConfig.series[metricConfig.series.length - 1].year}`,
+      description: 'Dette panelet bygger kun på markedsdata fra AI-tolkede rapporter.',
+      source: 'market',
+      metrics: [
+        { label: 'Siste verdi', value: formatMetricValue(latest.value) },
+        {
+          label: 'YoY endring',
+          value: delta === null ? '—' : `${formatMetricValue(Math.abs(delta))} ${delta > 0 ? 'opp' : delta < 0 ? 'ned' : 'uendret'}`,
+          tone: delta === null ? 'neutral' : delta > 0 ? 'up' : delta < 0 ? 'down' : 'neutral',
+        },
+        { label: 'Datapunkter', value: metricConfig.series.length.toLocaleString('en-US') },
+        { label: `Prosjekter i ${latest.year}`, value: linkedProjects.length.toLocaleString('en-US') },
+      ],
+      chartTitle: 'Historisk utvikling',
+      chartKind: metric === 'spend' ? 'area' : 'bar',
+      chartFormat: metricConfig.format,
+      chartData: metricConfig.series.map((item) => ({
+        label: String(item.year),
+        value: item.value,
+      })),
+      listTitle: 'Siste datapunkter',
+      listItems: [...metricConfig.series]
+        .slice(-8)
+        .reverse()
+        .map((item) => ({
+          label: String(item.year),
+          value: formatMetricValue(item.value),
+        })),
+      projects: linkedProjects,
+    })
+  }
+
+  const openSpendingYearInsight = (year: number) => {
+    const spendingPoint = spendingByYear.find((item) => item.year === year)
+    const previousPoint = spendingByYear.find((item) => item.year === year - 1)
+    const linkedProjects = getProjectsByYear(year)
+    const regionalYear = regionalSpendData.find((item) => item.year === year) as Record<string, number> | undefined
+    const regionalBreakdown = REGION_KEYS
+      .map((region) => ({
+        label: region.label,
+        value: regionalYear?.[region.label],
+      }))
+      .filter((item): item is { label: string; value: number } => typeof item.value === 'number' && Number.isFinite(item.value) && item.value > 0)
+      .sort((a, b) => b.value - a.value)
+
+    openInsightPanel({
+      id: `market-spending-year-${year}`,
+      title: `Subsea spend ${year}`,
+      subtitle: spendingPoint ? formatBillions(spendingPoint.value) : 'Ingen verdi',
+      source: 'market',
+      metrics: [
+        { label: 'Global spend', value: spendingPoint ? formatBillions(spendingPoint.value) : '—' },
+        {
+          label: 'YoY',
+          value: spendingPoint && previousPoint && previousPoint.value !== 0
+            ? formatPercent(((spendingPoint.value - previousPoint.value) / previousPoint.value) * 100)
+            : '—',
+          tone: spendingPoint && previousPoint ? (spendingPoint.value >= previousPoint.value ? 'up' : 'down') : 'neutral',
+        },
+        { label: 'Prosjekter i året', value: linkedProjects.length.toLocaleString('en-US') },
+        { label: 'Regioner med data', value: regionalBreakdown.length.toLocaleString('en-US') },
+      ],
+      chartTitle: `Regional fordeling ${year}`,
+      chartKind: 'bar',
+      chartFormat: 'currencyBillions',
+      chartData: regionalBreakdown.map((item) => ({ label: item.label, value: item.value })),
+      listTitle: 'Regionandel',
+      listItems: regionalBreakdown.map((item) => ({
+        label: item.label,
+        value: formatBillions(item.value),
+      })),
+      projects: linkedProjects,
+    })
+  }
+
+  const openXmtYearInsight = (year: number) => {
+    const xmtPoint = xmtByYear.find((item) => item.year === year)
+    const linkedProjects = getProjectsByYear(year)
+    const operatorBreakdown = aggregateProjectMetric(
+      linkedProjects,
+      (project) => project.operator || 'Ukjent operatør',
+      (project) => project.xmt_count || 0
+    ).slice(0, 10)
+
+    openInsightPanel({
+      id: `market-xmt-year-${year}`,
+      title: `XMT installations ${year}`,
+      subtitle: xmtPoint ? Math.round(xmtPoint.value).toLocaleString('en-US') : 'Ingen verdi',
+      source: 'market',
+      metrics: [
+        { label: 'Forecast', value: xmtPoint ? Math.round(xmtPoint.value).toLocaleString('en-US') : '—' },
+        { label: 'Prosjekter i året', value: linkedProjects.length.toLocaleString('en-US') },
+        {
+          label: 'Registrert i prosjektdata',
+          value: Math.round(linkedProjects.reduce((sum, project) => sum + (project.xmt_count || 0), 0)).toLocaleString('en-US'),
+        },
+      ],
+      chartTitle: 'Operatører i valgt år',
+      chartKind: 'bar',
+      chartFormat: 'count',
+      chartData: operatorBreakdown.map((item) => ({
+        label: item.label,
+        value: item.value,
+      })),
+      listTitle: 'Topp operatører',
+      listItems: operatorBreakdown.map((item) => ({
+        label: item.label,
+        value: Math.round(item.value).toLocaleString('en-US'),
+      })),
+      projects: linkedProjects,
+    })
+  }
+
+  const openRegionalYearInsight = (year: number) => {
+    const selected = regionalSpendData.find((item) => item.year === year) as Record<string, number> | undefined
+    if (!selected) return
+
+    const breakdown = REGION_KEYS
+      .map((region) => ({
+        label: region.label,
+        value: selected[region.label],
+      }))
+      .filter((item): item is { label: string; value: number } => typeof item.value === 'number' && Number.isFinite(item.value) && item.value > 0)
+      .sort((a, b) => b.value - a.value)
+    const total = breakdown.reduce((sum, item) => sum + item.value, 0)
+
+    openInsightPanel({
+      id: `regional-year-${year}`,
+      title: `Regional spend ${year}`,
+      subtitle: formatBillions(total),
+      source: 'market',
+      metrics: [
+        { label: 'Total', value: formatBillions(total) },
+        { label: 'Regioner med data', value: breakdown.length.toLocaleString('en-US') },
+      ],
+      chartTitle: 'Regionfordeling',
+      chartKind: 'bar',
+      chartFormat: 'currencyBillions',
+      chartData: breakdown.map((item) => ({ label: item.label, value: item.value })),
+      listTitle: 'Andel per region',
+      listItems: breakdown.map((item) => ({
+        label: item.label,
+        value: formatBillions(item.value),
+        detail: total > 0 ? `${((item.value / total) * 100).toFixed(1)}% av total` : undefined,
+      })),
+    })
+  }
+
+  const openRegionalRegionInsight = (regionLabel: string) => {
+    const timeline = regionalSpendData
+      .map((row) => {
+        const record = row as Record<string, number>
+        const value = record[regionLabel]
+        return typeof value === 'number' && Number.isFinite(value)
+          ? { label: String(row.year), value }
+          : null
+      })
+      .filter((entry): entry is { label: string; value: number } => Boolean(entry))
+
+    if (!timeline.length) return
+
+    const latest = timeline[timeline.length - 1]
+    const previous = timeline.length > 1 ? timeline[timeline.length - 2] : null
+    const linkedProjects = viewProjects.filter((project) =>
+      normalize(project.continent).includes(normalize(regionLabel))
+    )
+
+    openInsightPanel({
+      id: `regional-region-${normalize(regionLabel)}`,
+      title: regionLabel,
+      subtitle: `Siste verdi ${formatBillions(latest.value)}`,
+      source: 'market',
+      metrics: [
+        { label: 'Siste år', value: latest.label },
+        { label: 'Siste verdi', value: formatBillions(latest.value) },
+        {
+          label: 'YoY',
+          value: previous && previous.value !== 0 ? formatPercent(((latest.value - previous.value) / previous.value) * 100) : '—',
+          tone: previous ? (latest.value >= previous.value ? 'up' : 'down') : 'neutral',
+        },
+        { label: 'Prosjektmatch', value: linkedProjects.length.toLocaleString('en-US') },
+      ],
+      chartTitle: 'Utvikling over tid',
+      chartKind: 'area',
+      chartFormat: 'currencyBillions',
+      chartData: timeline,
+      listTitle: 'Siste år',
+      listItems: [...timeline]
+        .reverse()
+        .slice(0, 8)
+        .map((item) => ({
+          label: item.label,
+          value: formatBillions(item.value),
+        })),
+      projects: linkedProjects,
+    })
+  }
+
+  const openReportStatInsight = (key: 'totalReports' | 'withSummary' | 'withPdf' | 'latestReportDate') => {
+    const sortedReports = [...reportInsights].sort(
+      (a, b) => new Date(b.report.created_at).getTime() - new Date(a.report.created_at).getTime()
+    )
+    const source =
+      key === 'withSummary'
+        ? sortedReports.filter((item) => Boolean(item.report.ai_summary?.trim()))
+        : key === 'withPdf'
+          ? sortedReports.filter((item) => Boolean(item.report.download_url))
+          : sortedReports
+
+    openInsightPanel({
+      id: `report-stat-${key}`,
+      title: key === 'totalReports'
+        ? 'Totalt antall rapporter'
+        : key === 'withSummary'
+          ? 'Rapporter med AI-sammendrag'
+          : key === 'withPdf'
+            ? 'Rapporter med PDF-link'
+            : 'Siste oppdatering',
+      subtitle: key === 'latestReportDate'
+        ? reportStats.latestReportDate
+        : source.length.toLocaleString('en-US'),
+      source: 'reports',
+      metrics: [
+        { label: 'Rapporter', value: reportStats.totalReports.toLocaleString('en-US') },
+        { label: 'Med sammendrag', value: reportStats.withSummary.toLocaleString('en-US') },
+        { label: 'Med PDF-link', value: reportStats.withPdf.toLocaleString('en-US') },
+        { label: 'Forecast-punkter', value: reportStats.forecastPoints.toLocaleString('en-US') },
+      ],
+      chartTitle: 'Rapporter per år',
+      chartKind: 'bar',
+      chartFormat: 'count',
+      chartData: reportTimelineData,
+      listTitle: 'Siste rapporter',
+      listItems: source.slice(0, 12).map((item) => ({
+        label: item.displayPeriod,
+        value: formatReportDate(item.report.created_at),
+        detail: item.report.download_url ? 'PDF tilgjengelig' : 'Ingen PDF-link',
+      })),
+    })
+  }
+
+  const clickableCardClass = 'cursor-pointer transition-colors hover:border-[var(--csub-gold-soft)] hover:bg-[color:rgba(77,184,158,0.08)]'
+  const isInsightOpen = Boolean(insight)
+  const activeInsightCountry = insight?.id.startsWith('country-')
+    ? insight.title.replace(/^Land:\s*/i, '')
+    : null
 
   return (
     <div className="min-h-screen bg-[var(--bg-dark)] text-gray-100">
@@ -1436,17 +2275,18 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         </section>
 
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6">
-          {[
-            { label: 'Total poster', value: loading ? '—' : computedStats.totalProjects.toLocaleString('en-US') },
-            { label: 'Total SURF km', value: loading ? '—' : `${computedStats.totalSurfKm.toLocaleString('en-US')} km` },
-            { label: 'Total XMTs', value: loading ? '—' : computedStats.totalXmts.toLocaleString('en-US') },
-            { label: view === 'historical' ? 'Awards siste 12m' : 'Kommende prosjekter', value: loading ? '—' : computedStats.upcomingAwards.toLocaleString('en-US') },
-            { label: 'Regioner', value: loading ? '—' : computedStats.regionCount.toLocaleString('en-US') },
-          ].map((kpi) => (
-            <div key={kpi.label} className="bg-[var(--csub-dark)] p-6 rounded-xl border border-[var(--csub-light-soft)] shadow-lg flex flex-col justify-between">
+          {summaryKpis.map((kpi) => (
+            <button
+              key={kpi.label}
+              type="button"
+              onClick={() => openSummaryKpiInsight(kpi.key)}
+              disabled={loading}
+              className={`bg-[var(--csub-dark)] p-6 rounded-xl border border-[var(--csub-light-soft)] shadow-lg flex flex-col justify-between text-left ${clickableCardClass} disabled:opacity-60 disabled:cursor-not-allowed`}
+            >
               <span className="text-xs font-sans text-[var(--text-muted)] uppercase tracking-wider">{kpi.label}</span>
               <span className="text-3xl font-mono font-semibold text-white mt-2">{kpi.value}</span>
-            </div>
+              <span className="mt-3 text-[10px] uppercase tracking-[0.16em] text-[var(--csub-light)]">Klikk for drill-down</span>
+            </button>
           ))}
         </section>
 
@@ -1463,17 +2303,31 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                       <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} dy={10} />
                       <YAxis axisLine={false} tickLine={false} tickFormatter={(value: number) => `$${Math.round(value / 1_000_000)}M`} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} dx={-10} />
                       <Tooltip content={<PipelineTooltip />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
-                      <Bar dataKey="value" fill="#4db89e" radius={[4, 4, 0, 0]} />
+                      <Bar
+                        dataKey="value"
+                        fill="#4db89e"
+                        radius={[4, 4, 0, 0]}
+                        className="cursor-pointer"
+                        onClick={(raw: unknown) => {
+                          const data = raw as { period?: string }
+                          if (data.period) openPipelineYearInsight(data.period)
+                        }}
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 sm:grid-cols-5 gap-2">
                   {pipelineFlowData.map((phase) => (
-                    <div key={phase.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.7)] p-3 text-center">
+                    <button
+                      key={phase.label}
+                      type="button"
+                      onClick={() => openPipelinePhaseInsight(phase.label)}
+                      className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.7)] p-3 text-center ${clickableCardClass}`}
+                    >
                       <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">{phase.label}</p>
                       <p className="font-mono text-xl text-white mt-1">{phase.value.toLocaleString('en-US')}</p>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </>
@@ -1508,7 +2362,21 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 <div className="w-[160px] h-[160px] shrink-0">
                   <ResponsiveContainer>
                     <PieChart>
-                      <Pie data={viewCharts.byPhase.slice(0, 6)} dataKey="count" nameKey="phase" cx="50%" cy="50%" innerRadius={38} outerRadius={70} strokeWidth={0}>
+                      <Pie
+                        data={viewCharts.byPhase.slice(0, 6)}
+                        dataKey="count"
+                        nameKey="phase"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={38}
+                        outerRadius={70}
+                        strokeWidth={0}
+                        onClick={(raw: unknown) => {
+                          const data = raw as { phase?: string }
+                          if (data.phase) openPhaseInsight(data.phase)
+                        }}
+                        className="cursor-pointer"
+                      >
                         {viewCharts.byPhase.slice(0, 6).map((entry, index) => (
                           <Cell key={`${entry.phase}-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
                         ))}
@@ -1519,11 +2387,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 </div>
                 <div className="flex flex-col gap-2 w-full">
                   {viewCharts.byPhase.slice(0, 6).map((item, index) => (
-                    <div key={item.phase} className="flex items-center gap-2 text-xs">
+                    <button
+                      key={item.phase}
+                      type="button"
+                      onClick={() => openPhaseInsight(item.phase)}
+                      className="flex items-center gap-2 text-xs text-left rounded px-2 py-1 hover:bg-[color:rgba(77,184,158,0.08)] cursor-pointer transition-colors"
+                    >
                       <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }} />
                       <span className="truncate text-[var(--text-muted)]">{item.phase}</span>
                       <span className="font-mono font-semibold ml-auto text-white">{item.count.toLocaleString('en-US')}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -1538,7 +2411,21 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 <div className="w-[160px] h-[160px] shrink-0">
                   <ResponsiveContainer>
                     <PieChart>
-                      <Pie data={viewCharts.byCountry.slice(0, 6)} dataKey="count" nameKey="country" cx="50%" cy="50%" innerRadius={38} outerRadius={70} strokeWidth={0}>
+                      <Pie
+                        data={viewCharts.byCountry.slice(0, 6)}
+                        dataKey="count"
+                        nameKey="country"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={38}
+                        outerRadius={70}
+                        strokeWidth={0}
+                        onClick={(raw: unknown) => {
+                          const data = raw as { country?: string }
+                          if (data.country) openCountryInsight(data.country)
+                        }}
+                        className="cursor-pointer"
+                      >
                         {viewCharts.byCountry.slice(0, 6).map((entry, index) => (
                           <Cell key={`${entry.country}-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
                         ))}
@@ -1549,11 +2436,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 </div>
                 <div className="flex flex-col gap-2 w-full">
                   {viewCharts.byCountry.slice(0, 6).map((item, index) => (
-                    <div key={item.country} className="flex items-center gap-2 text-xs">
+                    <button
+                      key={item.country}
+                      type="button"
+                      onClick={() => openCountryInsight(item.country)}
+                      className="flex items-center gap-2 text-xs text-left rounded px-2 py-1 hover:bg-[color:rgba(77,184,158,0.08)] cursor-pointer transition-colors"
+                    >
                       <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }} />
                       <span className="truncate text-[var(--text-muted)]">{item.country}</span>
                       <span className="font-mono font-semibold ml-auto text-white">{item.count.toLocaleString('en-US')}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -1577,7 +2469,18 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                     <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
                     <Tooltip content={<CompactTooltip />} cursor={{ stroke: '#4db89e', strokeOpacity: 0.2 }} />
-                    <Area type="monotone" dataKey="count" stroke="#4db89e" fill="url(#trendGradient)" strokeWidth={2} />
+                    <Area
+                      type="monotone"
+                      dataKey="count"
+                      stroke="#4db89e"
+                      fill="url(#trendGradient)"
+                      strokeWidth={2}
+                      className="cursor-pointer"
+                      onClick={(raw: unknown) => {
+                        const data = raw as { year?: number }
+                        if (typeof data.year === 'number') openYearInsight(data.year)
+                      }}
+                    />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -1597,13 +2500,18 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 {viewCompanies.contractors.slice(0, 8).map((contractor) => {
                   const maxCount = Math.max(...viewCompanies.contractors.map((company) => company.count), 1)
                   return (
-                    <div key={contractor.name} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4">
+                    <button
+                      key={contractor.name}
+                      type="button"
+                      onClick={() => openContractorInsight(contractor.name)}
+                      className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4 text-left ${clickableCardClass}`}
+                    >
                       <p className="text-sm text-white truncate">{contractor.name}</p>
                       <p className="font-mono text-xl text-[var(--csub-light)] mt-1">{contractor.count.toLocaleString('en-US')}</p>
                       <div className="w-full h-1.5 mt-2 rounded bg-[color:rgba(77,184,158,0.14)]">
                         <div className="h-full rounded bg-gradient-to-r from-[var(--csub-light)] to-[var(--csub-gold)]" style={{ width: `${Math.round((contractor.count / maxCount) * 100)}%` }} />
                       </div>
-                    </div>
+                    </button>
                   )
                 })}
               </div>
@@ -1616,10 +2524,15 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {viewCompanies.operators.slice(0, 10).map((operator) => (
-                  <div key={operator.name} className="flex justify-between items-center rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                  <button
+                    key={operator.name}
+                    type="button"
+                    onClick={() => openOperatorInsight(operator.name)}
+                    className={`flex justify-between items-center rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3 text-left ${clickableCardClass}`}
+                  >
                     <span className="text-sm text-[var(--text-muted)] truncate pr-3">{operator.name}</span>
                     <span className="font-mono text-sm text-white">{operator.count.toLocaleString('en-US')}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -1725,7 +2638,11 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Panel title="Regioner - verdenskart">
-            <MapSection countryData={viewCharts.byCountry} />
+            <MapSection
+              countryData={viewCharts.byCountry}
+              onCountrySelect={openCountryInsight}
+              activeCountry={activeInsightCountry}
+            />
           </Panel>
 
           <Panel title="Vanndybde-fordeling">
@@ -1739,7 +2656,15 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                     <XAxis dataKey="depth" axisLine={false} tickLine={false} angle={-25} textAnchor="end" height={70} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
                     <Tooltip content={<CompactTooltip />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
-                    <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                    <Bar
+                      dataKey="count"
+                      radius={[4, 4, 0, 0]}
+                      className="cursor-pointer"
+                      onClick={(raw: unknown) => {
+                        const data = raw as { depth?: string }
+                        if (data.depth) openDepthInsight(data.depth)
+                      }}
+                    >
                       {viewCharts.byDepth.slice(0, 10).map((entry, index) => (
                         <Cell key={`${entry.depth}-${index}`} fill={BAR_COLORS[index % BAR_COLORS.length]} />
                       ))}
@@ -1762,14 +2687,22 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 w-full lg:w-auto">
-              <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-3 py-2">
+              <button
+                type="button"
+                onClick={() => openReportStatInsight('latestReportDate')}
+                className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-3 py-2 text-left ${clickableCardClass}`}
+              >
                 <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Siste rapport</p>
                 <p className="font-mono text-sm text-white mt-1">{marketMeta.latestReportDate}</p>
-              </div>
-              <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-3 py-2">
+              </button>
+              <button
+                type="button"
+                onClick={() => openMarketMetricInsight('spend')}
+                className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-3 py-2 text-left ${clickableCardClass}`}
+              >
                 <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Forecast range</p>
                 <p className="font-mono text-sm text-white mt-1">{marketMeta.forecastCoverage}</p>
-              </div>
+              </button>
             </div>
           </div>
         </section>
@@ -1794,7 +2727,18 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                     <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} tickFormatter={(v: number) => `$${v}B`} />
                     <Tooltip content={<MarketTooltip unit="USD Bn" />} cursor={{ stroke: '#4db89e', strokeOpacity: 0.2 }} />
-                    <Area type="monotone" dataKey="value" stroke="#4db89e" fill="url(#spendGradient)" strokeWidth={2} />
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#4db89e"
+                      fill="url(#spendGradient)"
+                      strokeWidth={2}
+                      className="cursor-pointer"
+                      onClick={(raw: unknown) => {
+                        const data = raw as { year?: number }
+                        if (typeof data.year === 'number') openSpendingYearInsight(data.year)
+                      }}
+                    />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -1814,7 +2758,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                     <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
                     <Tooltip content={<MarketTooltip unit="units" />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
-                    <Bar dataKey="value" fill="#4db89e" radius={[4, 4, 0, 0]} />
+                    <Bar
+                      dataKey="value"
+                      fill="#4db89e"
+                      radius={[4, 4, 0, 0]}
+                      className="cursor-pointer"
+                      onClick={(raw: unknown) => {
+                        const data = raw as { year?: number }
+                        if (typeof data.year === 'number') openXmtYearInsight(data.year)
+                      }}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1831,30 +2784,54 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             ) : (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (regionalSummary?.latestYear) openRegionalYearInsight(regionalSummary.latestYear)
+                    }}
+                    className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3 text-left ${clickableCardClass}`}
+                  >
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Total spend</p>
                     <p className="font-mono text-xl text-white mt-1">
                       ${regionalTotal.toFixed(1)}B
                     </p>
-                  </div>
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (regionalSummary?.latestYear) openRegionalYearInsight(regionalSummary.latestYear)
+                    }}
+                    className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3 text-left ${clickableCardClass}`}
+                  >
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">YoY endring</p>
                     <p className={`font-mono text-xl mt-1 ${regionalYoyDelta !== null && regionalYoyDelta > 0 ? 'text-[var(--csub-light)]' : regionalYoyDelta !== null && regionalYoyDelta < 0 ? 'text-[#d29884]' : 'text-white'}`}>
                       {regionalYoyDelta === null ? '—' : `${regionalYoyDelta > 0 ? '+' : ''}${regionalYoyDelta.toFixed(1)}B`}
                     </p>
-                  </div>
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (regionalTopRegion?.label) openRegionalRegionInsight(regionalTopRegion.label)
+                    }}
+                    className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3 text-left ${clickableCardClass}`}
+                  >
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Sterkeste region</p>
                     <p className="font-mono text-sm text-white mt-1 truncate">{regionalTopRegion?.label ?? '—'}</p>
                     <p className="text-xs text-[var(--text-muted)] mt-1">
                       {regionalTopRegion ? `$${regionalTopRegion.value.toFixed(1)}B` : '—'}
                     </p>
-                  </div>
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (regionalSummary?.latestYear) openRegionalYearInsight(regionalSummary.latestYear)
+                    }}
+                    className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3 text-left ${clickableCardClass}`}
+                  >
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Datadekning</p>
                     <p className="font-mono text-xl text-white mt-1">{regionalSummary?.coverageCount ?? 0}</p>
                     <p className="text-xs text-[var(--text-muted)] mt-1">regioner med verdi</p>
-                  </div>
+                  </button>
                 </div>
 
                 <div className="h-[360px]">
@@ -1872,6 +2849,11 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                           stackId="regions"
                           fill={REGION_COLORS[index % REGION_COLORS.length]}
                           maxBarSize={56}
+                          className="cursor-pointer"
+                          onClick={(raw: unknown) => {
+                            const data = raw as { year?: number }
+                            if (typeof data.year === 'number') openRegionalYearInsight(data.year)
+                          }}
                         />
                       ))}
                     </BarChart>
@@ -1881,11 +2863,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 {regionalSummary?.topShares?.length ? (
                   <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                     {regionalSummary.topShares.map((item) => (
-                      <div key={item.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] p-3">
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => openRegionalRegionInsight(item.label)}
+                        className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] p-3 text-left ${clickableCardClass}`}
+                      >
                         <p className="text-xs text-[var(--text-muted)] truncate">{item.label}</p>
                         <p className="font-mono text-sm text-white mt-1">${item.value.toFixed(1)}B</p>
                         <p className="text-xs text-[var(--text-muted)] mt-1">{item.share.toFixed(1)}% av totalen</p>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : null}
@@ -1914,22 +2901,38 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 )}
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => openReportStatInsight('totalReports')}
+                    className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2 text-left ${clickableCardClass}`}
+                  >
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Rapporter</p>
                     <p className="font-mono text-lg text-white">{reportStats.totalReports}</p>
-                  </div>
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReportStatInsight('withSummary')}
+                    className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2 text-left ${clickableCardClass}`}
+                  >
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Med AI-sammendrag</p>
                     <p className="font-mono text-lg text-white">{reportStats.withSummary}</p>
-                  </div>
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReportStatInsight('withPdf')}
+                    className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2 text-left ${clickableCardClass}`}
+                  >
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Med PDF-link</p>
                     <p className="font-mono text-lg text-white">{reportStats.withPdf}</p>
-                  </div>
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReportStatInsight('latestReportDate')}
+                    className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2 text-left ${clickableCardClass}`}
+                  >
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Siste oppdatert</p>
                     <p className="font-mono text-sm text-white mt-1">{reportStats.latestReportDate}</p>
-                  </div>
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -2066,7 +3069,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {keyMetricCards.map((item) => (
-                    <div key={item.label} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4">
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => openMarketMetricInsight(item.metricKey)}
+                      className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4 text-left ${clickableCardClass}`}
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-sans text-[var(--text-muted)] uppercase tracking-wider">{item.label}</span>
                         <span className="text-[10px] uppercase tracking-wider text-[var(--csub-gold)]">{item.source}</span>
@@ -2075,7 +3083,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                       <p className={`text-xs font-mono mt-2 ${item.trendTone === 'up' ? 'text-[var(--csub-light)]' : item.trendTone === 'down' ? 'text-[#d29884]' : 'text-[var(--text-muted)]'}`}>
                         {item.trendLabel || 'Ingen sammenlignbar historikk ennå'}
                       </p>
-                    </div>
+                    </button>
                   ))}
                 </div>
                 <div className="mt-4 rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2 text-xs text-[var(--text-muted)]">
@@ -2098,7 +3106,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                     <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
                     <Tooltip content={<CompactTooltip />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
-                    <Bar dataKey="count" fill="#4db89e" radius={[4, 4, 0, 0]} />
+                    <Bar
+                      dataKey="count"
+                      fill="#4db89e"
+                      radius={[4, 4, 0, 0]}
+                      className="cursor-pointer"
+                      onClick={(raw: unknown) => {
+                        const data = raw as { year?: number }
+                        if (typeof data.year === 'number') openYearInsight(data.year)
+                      }}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -2110,6 +3127,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </Panel>
         </section>
       </main>
+
+      <InsightDrawer
+        insight={insight}
+        open={isInsightOpen}
+        onClose={closeInsightPanel}
+        onSelectProject={openProjectFromInsight}
+      />
 
       {reportDeleteCandidate && (
         <>
@@ -2230,6 +3254,179 @@ function RegionalTooltip({ active, payload, label }: { active?: boolean; payload
         </div>
       ))}
     </div>
+  )
+}
+
+function InsightTooltip({
+  active,
+  payload,
+  label,
+  format,
+}: {
+  active?: boolean
+  payload?: Array<{ value?: number }>
+  label?: string | number
+  format: InsightValueFormat
+}) {
+  if (!active || !payload?.length) return null
+  const raw = payload[0]?.value ?? 0
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  return (
+    <div className="bg-[var(--csub-dark)] p-3 rounded-lg border border-[var(--csub-light-soft)] shadow-xl">
+      <p className="text-xs text-[var(--text-muted)] mb-1">{label}</p>
+      <p className="font-mono text-sm text-white">{formatInsightValue(value, format)}</p>
+    </div>
+  )
+}
+
+function InsightDrawer({
+  insight,
+  open,
+  onClose,
+  onSelectProject,
+}: {
+  insight: InsightState | null
+  open: boolean
+  onClose: () => void
+  onSelectProject: (project: Project) => void
+}) {
+  if (!insight) return null
+
+  const gradientId = `insight-${insight.id.replace(/[^a-z0-9-]/gi, '')}`
+  const chartFormat = insight.chartFormat ?? 'count'
+  const chartData = insight.chartData ?? []
+  const projectRows = insight.projects?.slice(0, 12) ?? []
+  const sourceLabel = insight.source === 'projects' ? 'Project Data' : insight.source === 'market' ? 'Market Data' : 'Reports'
+
+  return (
+    <>
+      {open && <div className="fixed inset-0 bg-black/50 z-[204]" onClick={onClose} />}
+      <aside className={`fixed top-0 left-0 bottom-0 w-[640px] max-w-[95vw] bg-[var(--csub-dark)] z-[205] transition-transform duration-300 border-r border-[var(--csub-light-soft)] ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="h-full overflow-y-auto">
+          <div className="sticky top-0 z-10 px-5 py-4 border-b border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.95)] backdrop-blur">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--csub-light)]">{sourceLabel}</p>
+                <h3 className="text-lg text-white mt-1 truncate">{insight.title}</h3>
+                {insight.subtitle && <p className="text-xs text-[var(--text-muted)] mt-1">{insight.subtitle}</p>}
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-white text-xl px-2 py-1 rounded hover:bg-white/15 cursor-pointer"
+                aria-label="Lukk drill-down"
+              >
+                ×
+              </button>
+            </div>
+            {insight.description && (
+              <p className="text-xs text-[var(--text-muted)] mt-3 leading-relaxed">{insight.description}</p>
+            )}
+          </div>
+
+          <div className="p-5 space-y-5">
+            {insight.metrics.length > 0 && (
+              <section>
+                <div className="grid grid-cols-2 gap-2">
+                  {insight.metrics.map((metric, index) => (
+                    <div key={`${insight.id}-metric-${index}`} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.5)] px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">{metric.label}</p>
+                      <p className={`font-mono text-sm mt-1 ${
+                        metric.tone === 'up'
+                          ? 'text-[var(--csub-light)]'
+                          : metric.tone === 'down'
+                            ? 'text-[#d29884]'
+                            : 'text-white'
+                      }`}>
+                        {metric.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {insight.chartTitle && chartData.length > 0 && (
+              <section>
+                <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)] mb-3">{insight.chartTitle}</p>
+                <div className="h-[250px] rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3">
+                  <ResponsiveContainer>
+                    {insight.chartKind === 'area' ? (
+                      <AreaChart data={chartData}>
+                        <defs>
+                          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#4db89e" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="#4db89e" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
+                        <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
+                        <Tooltip content={<InsightTooltip format={chartFormat} />} cursor={{ stroke: '#4db89e', strokeOpacity: 0.2 }} />
+                        <Area type="monotone" dataKey="value" stroke="#4db89e" fill={`url(#${gradientId})`} strokeWidth={2} />
+                      </AreaChart>
+                    ) : (
+                      <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
+                        <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} angle={-20} textAnchor="end" height={58} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
+                        <Tooltip content={<InsightTooltip format={chartFormat} />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
+                        <Bar dataKey="value" fill="#4db89e" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    )}
+                  </ResponsiveContainer>
+                </div>
+              </section>
+            )}
+
+            {insight.listTitle && (insight.listItems?.length ?? 0) > 0 && (
+              <section>
+                <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)] mb-2">{insight.listTitle}</p>
+                <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] divide-y divide-[var(--csub-light-faint)]">
+                  {insight.listItems?.map((item, index) => (
+                    <div key={`${insight.id}-list-${index}`} className="px-3 py-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-white truncate">{item.label}</span>
+                        <span className="font-mono text-sm text-[var(--csub-light)] shrink-0">{item.value}</span>
+                      </div>
+                      {item.detail && <p className="text-xs text-[var(--text-muted)] mt-1">{item.detail}</p>}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)] mb-2">Relaterte prosjekter</p>
+              {projectRows.length > 0 ? (
+                <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] divide-y divide-[var(--csub-light-faint)]">
+                  {projectRows.map((project) => (
+                    <button
+                      key={`${insight.id}-${buildProjectKey(project)}`}
+                      type="button"
+                      onClick={() => onSelectProject(project)}
+                      className="w-full text-left px-3 py-2 hover:bg-[color:rgba(77,184,158,0.08)] transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-white truncate">{getProjectDisplayName(project)}</span>
+                        <span className="text-xs font-mono text-[var(--text-muted)] shrink-0">{getProjectYear(project) ?? '—'}</span>
+                      </div>
+                      <p className="text-xs text-[var(--text-muted)] mt-1 truncate">
+                        {project.country || 'Ukjent land'} • {project.operator || project.surf_contractor || 'Ukjent aktør'}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-4 text-xs text-[var(--text-muted)]">
+                  Ingen direkte prosjektkobling for denne statistikken.
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      </aside>
+    </>
   )
 }
 
