@@ -495,6 +495,127 @@ async function downloadJobBuffer(supabase: ReturnType<typeof createAdminClient>,
   return Buffer.from(await data.arrayBuffer())
 }
 
+// ---------------------------------------------------------------------------
+// Smart column detection & fuzzy mapping
+// ---------------------------------------------------------------------------
+
+type DetectedType = 'xmt' | 'surf' | 'subsea' | 'awards'
+
+/**
+ * Find a column in `columns` that matches any of `patterns` (case-insensitive substring).
+ * Returns the *original* column name or undefined.
+ */
+function fuzzyCol(columns: string[], ...patterns: string[]): string | undefined {
+  for (const pattern of patterns) {
+    const lower = pattern.toLowerCase()
+    const found = columns.find((c) => c.toLowerCase().includes(lower))
+    if (found) return found
+  }
+  return undefined
+}
+
+/**
+ * Detect what kind of Rystad data a sheet contains based on its column names.
+ */
+function detectSheetType(columns: string[]): DetectedType | null {
+  const lower = columns.map((c) => c.toLowerCase())
+
+  // Awards: "XMTs Awarded"
+  if (lower.some((c) => c.includes('xmts awarded'))) return 'awards'
+
+  // Subsea units: "Subsea Unit Category" or count column like "Subsea units (# Installed)" / "Subsea Units"
+  if (
+    lower.some((c) => c.includes('subsea unit category')) ||
+    lower.some((c) => /subsea\s*units?\s*(\(|$)/i.test(c))
+  ) return 'subsea'
+
+  // SURF: "SURF Line Group" or "SURF Line Purpose" or "KM Surf Lines" or "SURF Line Design Category"
+  if (
+    lower.some((c) => c.includes('surf line group')) ||
+    lower.some((c) => c.includes('surf line purpose')) ||
+    lower.some((c) => c.includes('km surf lines')) ||
+    lower.some((c) => c.includes('surf line design category'))
+  ) return 'surf'
+
+  // XMT: "XMT Purpose" or "XMT State" or count column containing "XMTs"
+  if (
+    lower.some((c) => c.includes('xmt purpose')) ||
+    lower.some((c) => c.includes('xmt state')) ||
+    lower.some((c) => /xmts?\s*(installed|\(#|$)/i.test(c))
+  ) return 'xmt'
+
+  return null
+}
+
+/**
+ * Get a value from a row using fuzzy column matching.
+ */
+function getCol(row: Record<string, unknown>, columns: string[], ...patterns: string[]): unknown {
+  const col = fuzzyCol(columns, ...patterns)
+  return col ? row[col] : undefined
+}
+
+function mapCommonFields(
+  row: Record<string, unknown>,
+  columns: string[],
+  batchId: string
+): Record<string, unknown> {
+  return {
+    import_batch_id: batchId,
+    year: int(getCol(row, columns, 'Year')),
+    continent: str(getCol(row, columns, 'Continent')),
+    country: str(getCol(row, columns, 'Country')),
+    development_project: str(getCol(row, columns, 'Development Project')),
+    asset: str(getCol(row, columns, 'Asset')),
+    operator: str(getCol(row, columns, 'Operator')),
+    surf_contractor: str(getCol(row, columns, 'SURF Installation Contractor')),
+    facility_category: str(getCol(row, columns, 'Facility Category')),
+    field_type: str(getCol(row, columns, 'Field Type Category')),
+    water_depth_category: str(getCol(row, columns, 'Water Depth Category')),
+    distance_group: str(getCol(row, columns, 'Distance To Tie In Group')),
+  }
+}
+
+function mapXmtRow(row: Record<string, unknown>, columns: string[], batchId: string): Record<string, unknown> {
+  return {
+    ...mapCommonFields(row, columns, batchId),
+    contract_award_year: int(getCol(row, columns, 'XMT Contract Award Year')),
+    contract_type: str(getCol(row, columns, 'XMT Contract Type')),
+    purpose: str(getCol(row, columns, 'XMT Purpose')) || '',
+    state: str(getCol(row, columns, 'XMT State')) || '',
+    xmt_count: int(getCol(row, columns, 'XMTs installed', 'XMTs (# Installed)', 'XMTs')),
+  }
+}
+
+function mapSurfRow(row: Record<string, unknown>, columns: string[], batchId: string): Record<string, unknown> {
+  return {
+    ...mapCommonFields(row, columns, batchId),
+    design_category: str(getCol(row, columns, 'SURF Line Design Category')) || '',
+    line_group: str(getCol(row, columns, 'SURF Line Group')) || '',
+    km_surf_lines: num(getCol(row, columns, 'KM Surf Lines')),
+  }
+}
+
+function mapSubseaRow(row: Record<string, unknown>, columns: string[], batchId: string): Record<string, unknown> {
+  return {
+    ...mapCommonFields(row, columns, batchId),
+    unit_category: str(getCol(row, columns, 'Subsea Unit Category')) || '',
+    unit_count: int(getCol(row, columns, 'Subsea units (# Installed)', 'Subsea Units', 'Subsea units')),
+  }
+}
+
+function mapAwardRow(row: Record<string, unknown>, columns: string[], batchId: string): Record<string, unknown> {
+  return {
+    ...mapCommonFields(row, columns, batchId),
+    field_size_category: str(getCol(row, columns, 'Field Size Category')),
+    xmts_awarded: int(getCol(row, columns, 'XMTs Awarded')),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// processExcelJob — smart auto-detecting version
+// ---------------------------------------------------------------------------
+
 async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, job: ImportJob): Promise<ProcessorStats> {
   const batchId = await startBatch(supabase, job, 'excel_rystad')
 
@@ -504,127 +625,114 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
 
     const stats = { total: 0, imported: 0, skipped: 0 }
 
-    const xmtRows = parseSheet(workbook, 'XMTs')
-      .map((r) => ({
-        import_batch_id: batchId,
-        year: int((r as Record<string, unknown>)['Year']),
-        continent: str((r as Record<string, unknown>)['Continent']),
-        country: str((r as Record<string, unknown>)['Country']),
-        development_project: str((r as Record<string, unknown>)['Development Project']),
-        asset: str((r as Record<string, unknown>)['Asset']),
-        operator: str((r as Record<string, unknown>)['Operator']),
-        surf_contractor: str((r as Record<string, unknown>)['SURF Installation Contractor']),
-        facility_category: str((r as Record<string, unknown>)['Facility Category']),
-        field_type: str((r as Record<string, unknown>)['Field Type Category']),
-        water_depth_category: str((r as Record<string, unknown>)['Water Depth Category']),
-        distance_group: str((r as Record<string, unknown>)['Distance To Tie In Group']),
-        contract_award_year: int((r as Record<string, unknown>)['XMT Contract Award Year']),
-        contract_type: str((r as Record<string, unknown>)['XMT Contract Type']),
-        purpose: str((r as Record<string, unknown>)['XMT Purpose']) || '',
-        state: str((r as Record<string, unknown>)['XMT State']) || '',
-        xmt_count: int((r as Record<string, unknown>)['XMTs installed (also future)']),
-      }))
-      .filter((r) => r.development_project)
+    const allXmt: Record<string, unknown>[] = []
+    const allSurf: Record<string, unknown>[] = []
+    const allSubsea: Record<string, unknown>[] = []
+    const allAwards: Record<string, unknown>[] = []
 
-    stats.total += xmtRows.length
-    const xmtResult = await upsertChunked(supabase, 'xmt_data', xmtRows, 'year,development_project,asset,purpose,state')
-    stats.imported += xmtResult.imported
-    stats.skipped += xmtResult.skipped
+    for (const sheetName of workbook.SheetNames) {
+      const rows = parseSheet(workbook, sheetName) as Record<string, unknown>[]
+      if (rows.length === 0) continue
 
-    const surfRows = parseSheet(workbook, 'Surf lines')
-      .map((r) => ({
-        import_batch_id: batchId,
-        year: int((r as Record<string, unknown>)['Year']),
-        continent: str((r as Record<string, unknown>)['Continent']),
-        country: str((r as Record<string, unknown>)['Country']),
-        development_project: str((r as Record<string, unknown>)['Development Project']),
-        asset: str((r as Record<string, unknown>)['Asset']),
-        operator: str((r as Record<string, unknown>)['Operator']),
-        surf_contractor: str((r as Record<string, unknown>)['SURF Installation Contractor']),
-        facility_category: str((r as Record<string, unknown>)['Facility Category']),
-        field_type: str((r as Record<string, unknown>)['Field Type Category']),
-        water_depth_category: str((r as Record<string, unknown>)['Water Depth Category']),
-        distance_group: str((r as Record<string, unknown>)['Distance To Tie In Group']),
-        design_category: str((r as Record<string, unknown>)['SURF Line Design Category']) || '',
-        line_group: str((r as Record<string, unknown>)['SURF Line Group']) || '',
-        km_surf_lines: num((r as Record<string, unknown>)['KM Surf Lines']),
-      }))
-      .filter((r) => r.development_project)
+      const columns = Object.keys(rows[0])
+      let detectedType = detectSheetType(columns)
 
-    stats.total += surfRows.length
-    const surfResult = await upsertChunked(supabase, 'surf_data', surfRows, 'year,development_project,asset,design_category,line_group')
-    stats.imported += surfResult.imported
-    stats.skipped += surfResult.skipped
+      // Fallback: try sheet name for awards (handles "Upcomming awards ..." variants)
+      if (!detectedType && /awards?/i.test(sheetName)) {
+        detectedType = 'awards'
+      }
 
-    const subseaRows = parseSheet(workbook, 'Subsea units')
-      .map((r) => ({
-        import_batch_id: batchId,
-        year: int((r as Record<string, unknown>)['Year']),
-        continent: str((r as Record<string, unknown>)['Continent']),
-        country: str((r as Record<string, unknown>)['Country']),
-        development_project: str((r as Record<string, unknown>)['Development Project']),
-        asset: str((r as Record<string, unknown>)['Asset']),
-        operator: str((r as Record<string, unknown>)['Operator']),
-        surf_contractor: str((r as Record<string, unknown>)['SURF Installation Contractor']),
-        facility_category: str((r as Record<string, unknown>)['Facility Category']),
-        field_type: str((r as Record<string, unknown>)['Field Type Category']),
-        water_depth_category: str((r as Record<string, unknown>)['Water Depth Category']),
-        distance_group: str((r as Record<string, unknown>)['Distance To Tie In Group']),
-        unit_category: str((r as Record<string, unknown>)['Subsea Unit Category']) || '',
-        unit_count: int((r as Record<string, unknown>)['Subsea Units']),
-      }))
-      .filter((r) => r.development_project)
+      if (!detectedType) {
+        console.log(`[Excel import] Sheet "${sheetName}" — could not detect data type, skipping (columns: ${columns.join(', ')})`)
+        continue
+      }
 
-    stats.total += subseaRows.length
-    const subseaResult = await upsertChunked(supabase, 'subsea_unit_data', subseaRows, 'year,development_project,asset,unit_category')
-    stats.imported += subseaResult.imported
-    stats.skipped += subseaResult.skipped
+      console.log(`[Excel import] Sheet "${sheetName}" → detected as ${detectedType.toUpperCase()} (${rows.length} rows)`)
 
-    const awardsSheetName = findSheet(workbook, 'Upcomming awards', 'Upcoming awards') || 'Upcomming awards'
-    const awardRows = parseSheet(workbook, awardsSheetName)
-      .map((r) => ({
-        import_batch_id: batchId,
-        year: int((r as Record<string, unknown>)['Year']),
-        country: str((r as Record<string, unknown>)['Country']),
-        development_project: str((r as Record<string, unknown>)['Development Project']),
-        asset: str((r as Record<string, unknown>)['Asset']),
-        operator: str((r as Record<string, unknown>)['Operator']),
-        surf_contractor: str((r as Record<string, unknown>)['SURF Installation Contractor']),
-        facility_category: str((r as Record<string, unknown>)['Facility Category']),
-        field_size_category: str((r as Record<string, unknown>)['Field Size Category']),
-        field_type: str((r as Record<string, unknown>)['Field Type Category']),
-        water_depth_category: str((r as Record<string, unknown>)['Water Depth Category']),
-        xmts_awarded: int((r as Record<string, unknown>)['XMTs Awarded']),
-      }))
-      .filter((r) => r.development_project)
+      switch (detectedType) {
+        case 'xmt':
+          for (const r of rows) {
+            const mapped = mapXmtRow(r, columns, batchId)
+            if (mapped.development_project) allXmt.push(mapped)
+          }
+          break
+        case 'surf':
+          for (const r of rows) {
+            const mapped = mapSurfRow(r, columns, batchId)
+            if (mapped.development_project) allSurf.push(mapped)
+          }
+          break
+        case 'subsea':
+          for (const r of rows) {
+            const mapped = mapSubseaRow(r, columns, batchId)
+            if (mapped.development_project) allSubsea.push(mapped)
+          }
+          break
+        case 'awards':
+          for (const r of rows) {
+            const mapped = mapAwardRow(r, columns, batchId)
+            if (mapped.development_project) allAwards.push(mapped)
+          }
+          break
+      }
+    }
 
-    stats.total += awardRows.length
-    const awardResult = await upsertChunked(supabase, 'upcoming_awards', awardRows, 'year,development_project,asset')
-    stats.imported += awardResult.imported
-    stats.skipped += awardResult.skipped
+    // Upsert each data type
+    if (allXmt.length > 0) {
+      stats.total += allXmt.length
+      const r = await upsertChunked(supabase, 'xmt_data', allXmt, 'year,development_project,asset,purpose,state')
+      stats.imported += r.imported
+      stats.skipped += r.skipped
+      console.log(`[Excel import] XMT: ${r.imported} imported, ${r.skipped} skipped`)
+    }
 
+    if (allSurf.length > 0) {
+      stats.total += allSurf.length
+      const r = await upsertChunked(supabase, 'surf_data', allSurf, 'year,development_project,asset,design_category,line_group')
+      stats.imported += r.imported
+      stats.skipped += r.skipped
+      console.log(`[Excel import] SURF: ${r.imported} imported, ${r.skipped} skipped`)
+    }
+
+    if (allSubsea.length > 0) {
+      stats.total += allSubsea.length
+      const r = await upsertChunked(supabase, 'subsea_unit_data', allSubsea, 'year,development_project,asset,unit_category')
+      stats.imported += r.imported
+      stats.skipped += r.skipped
+      console.log(`[Excel import] Subsea: ${r.imported} imported, ${r.skipped} skipped`)
+    }
+
+    if (allAwards.length > 0) {
+      stats.total += allAwards.length
+      const r = await upsertChunked(supabase, 'upcoming_awards', allAwards, 'year,development_project,asset')
+      stats.imported += r.imported
+      stats.skipped += r.skipped
+      console.log(`[Excel import] Awards: ${r.imported} imported, ${r.skipped} skipped`)
+    }
+
+    // Build projects summary
     const projectMap = new Map<string, Record<string, unknown>>()
-    const allRows = [
-      ...xmtRows.map((row) => ({ ...row, _type: 'xmt' })),
-      ...surfRows.map((row) => ({ ...row, _type: 'surf' })),
-      ...subseaRows.map((row) => ({ ...row, _type: 'subsea' })),
-      ...awardRows.map((row) => ({ ...row, _type: 'award' })),
+    const taggedRows: Array<Record<string, unknown> & { _type: string }> = [
+      ...allXmt.map((row) => ({ ...row, _type: 'xmt' })),
+      ...allSurf.map((row) => ({ ...row, _type: 'surf' })),
+      ...allSubsea.map((row) => ({ ...row, _type: 'subsea' })),
+      ...allAwards.map((row) => ({ ...row, _type: 'award' })),
     ]
 
-    for (const row of allRows) {
+    for (const row of taggedRows) {
       const key = `${row.development_project}|${row.asset}|${row.country}`
       if (!projectMap.has(key)) {
         projectMap.set(key, {
           development_project: row.development_project,
           asset: row.asset,
           country: row.country,
-          continent: (row as Record<string, unknown>).continent ?? null,
+          continent: row.continent ?? null,
           operator: row.operator,
           surf_contractor: row.surf_contractor,
           facility_category: row.facility_category,
           field_type: row.field_type,
           water_depth_category: row.water_depth_category,
-          field_size_category: (row as Record<string, unknown>).field_size_category ?? null,
+          field_size_category: row.field_size_category ?? null,
           xmt_count: 0,
           surf_km: 0,
           subsea_unit_count: 0,
@@ -634,14 +742,15 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
       }
 
       const project = projectMap.get(key)!
-      if (row.year) {
-        if (!project.first_year || row.year < (project.first_year as number)) project.first_year = row.year
-        if (!project.last_year || row.year > (project.last_year as number)) project.last_year = row.year
+      const year = row.year as number | null
+      if (year) {
+        if (!project.first_year || year < (project.first_year as number)) project.first_year = year
+        if (!project.last_year || year > (project.last_year as number)) project.last_year = year
       }
 
-      if (row._type === 'xmt') project.xmt_count = ((project.xmt_count as number) || 0) + ((row as Record<string, unknown>).xmt_count as number || 0)
-      if (row._type === 'surf') project.surf_km = ((project.surf_km as number) || 0) + ((row as Record<string, unknown>).km_surf_lines as number || 0)
-      if (row._type === 'subsea') project.subsea_unit_count = ((project.subsea_unit_count as number) || 0) + ((row as Record<string, unknown>).unit_count as number || 0)
+      if (row._type === 'xmt') project.xmt_count = ((project.xmt_count as number) || 0) + ((row.xmt_count as number) || 0)
+      if (row._type === 'surf') project.surf_km = ((project.surf_km as number) || 0) + ((row.km_surf_lines as number) || 0)
+      if (row._type === 'subsea') project.subsea_unit_count = ((project.subsea_unit_count as number) || 0) + ((row.unit_count as number) || 0)
     }
 
     const projects = Array.from(projectMap.values())
@@ -649,16 +758,17 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
       await upsertChunked(supabase, 'projects', projects, 'development_project,asset,country')
     }
 
-    const contractRows = awardRows
+    // Create contract rows from awards
+    const contractRows = allAwards
       .map((row) => ({
         date: `${row.year}-01-01`,
-        supplier: row.surf_contractor || 'TBD',
-        operator: row.operator || 'Unknown',
-        project_name: row.development_project || 'Unknown',
+        supplier: (row.surf_contractor as string) || 'TBD',
+        operator: (row.operator as string) || 'Unknown',
+        project_name: (row.development_project as string) || 'Unknown',
         description: `${row.xmts_awarded || 0} XMTs awarded - ${row.facility_category || 'N/A'}`,
         contract_type: 'Subsea' as const,
-        region: row.country,
-        country: row.country,
+        region: row.country as string,
+        country: row.country as string,
         source: 'rystad_forecast' as const,
         pipeline_phase: 'feed' as const,
         external_id: `rystad-award-${row.year}-${row.development_project}-${row.asset}`,
@@ -669,6 +779,7 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
       await upsertChunked(supabase, 'contracts', contractRows, 'external_id')
     }
 
+    console.log(`[Excel import] Done — total: ${stats.total}, imported: ${stats.imported}, skipped: ${stats.skipped}`)
     await completeBatch(supabase, batchId, stats)
 
     return {
