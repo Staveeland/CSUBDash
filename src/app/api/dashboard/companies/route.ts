@@ -8,8 +8,8 @@ export async function GET() {
     const supabase = auth.supabase
 
     const [projectsRes, contractsRes] = await Promise.all([
-      supabase.from('projects').select('surf_contractor, operator'),
-      supabase.from('contracts').select('contractor, operator'),
+      supabase.from('projects').select('surf_contractor, operator').limit(10000),
+      supabase.from('contracts').select('contractor, operator').limit(10000),
     ])
 
     if (projectsRes.error) throw projectsRes.error

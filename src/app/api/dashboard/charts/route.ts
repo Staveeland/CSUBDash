@@ -8,8 +8,8 @@ export async function GET() {
     const supabase = auth.supabase
 
     const [projectsRes, contractsRes] = await Promise.all([
-      supabase.from('projects').select('country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category'),
-      supabase.from('contracts').select('region, country, contract_type, award_date'),
+      supabase.from('projects').select('country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category').limit(10000),
+      supabase.from('contracts').select('region, country, contract_type, award_date').limit(10000),
     ])
 
     if (projectsRes.error) throw projectsRes.error
