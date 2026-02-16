@@ -743,6 +743,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [marketLoading, setMarketLoading] = useState(true)
   const [expandedReport, setExpandedReport] = useState<string | null>(null)
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
+  const [reportDeletePendingId, setReportDeletePendingId] = useState<string | null>(null)
+  const [reportDeleteConfirmId, setReportDeleteConfirmId] = useState<string | null>(null)
+  const [reportDeleteError, setReportDeleteError] = useState<string | null>(null)
+  const [reportDeleteNotice, setReportDeleteNotice] = useState<string | null>(null)
 
   const userLabel = getUserDisplayName(userEmail)
   const userInitials = getInitials(userLabel)
@@ -907,11 +911,22 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     setExpandedReport(null)
   }, [selectedReportId])
 
+  useEffect(() => {
+    if (!reportDeleteNotice) return
+    const timeout = window.setTimeout(() => setReportDeleteNotice(null), 3500)
+    return () => window.clearTimeout(timeout)
+  }, [reportDeleteNotice])
+
   const selectedReportInsight = useMemo(() => {
     if (!reportInsights.length) return null
     if (!selectedReportId) return reportInsights[0]
     return reportInsights.find((item) => item.report.id === selectedReportId) ?? reportInsights[0]
   }, [reportInsights, selectedReportId])
+
+  const reportDeleteCandidate = useMemo(() => {
+    if (!reportDeleteConfirmId) return null
+    return reportInsights.find((item) => item.report.id === reportDeleteConfirmId) ?? null
+  }, [reportDeleteConfirmId, reportInsights])
 
   const regionalSummary = useMemo(() => {
     if (!regionalSpendData.length) return null
@@ -1229,6 +1244,36 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     setSelectedProject(project)
     setDrawerOpen(true)
   }
+
+  const deleteMarketReport = useCallback(async (reportId: string) => {
+    setReportDeletePendingId(reportId)
+    setReportDeleteError(null)
+    setReportDeleteNotice(null)
+
+    try {
+      const response = await fetch('/api/dashboard/reports', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_id: reportId }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || `Sletting feilet (${response.status})`)
+      }
+
+      setReports((current) => current.filter((report) => report.id !== reportId))
+      setExpandedReport((current) => (current === reportId ? null : current))
+      setSelectedReportId((current) => (current === reportId ? null : current))
+      setReportDeleteNotice('Rapporten ble slettet.')
+      setReportDeleteConfirmId(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setReportDeleteError(message)
+    } finally {
+      setReportDeletePendingId(null)
+    }
+  }, [])
 
   const handleTableSort = (key: TableSortKey) => {
     setTableSort((current) => {
@@ -1857,6 +1902,17 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               <LoadingPlaceholder text="Ingen rapporter tilgjengelig" />
             ) : (
               <div className="space-y-4">
+                {reportDeleteError && (
+                  <div className="rounded-lg border border-[rgba(224,108,117,0.5)] bg-[rgba(224,108,117,0.12)] px-3 py-2 text-xs text-[#f2b7bc]">
+                    Sletting feilet: {reportDeleteError}
+                  </div>
+                )}
+                {reportDeleteNotice && (
+                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[rgba(77,184,158,0.12)] px-3 py-2 text-xs text-[var(--csub-light)]">
+                    {reportDeleteNotice}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                   <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] px-3 py-2">
                     <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Rapporter</p>
@@ -1911,16 +1967,29 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                               Lastet opp {formatReportDate(selectedReportInsight.report.created_at)}
                             </p>
                           </div>
-                          {selectedReportInsight.report.download_url && (
-                            <a
-                              href={selectedReportInsight.report.download_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-xs rounded-md border border-[var(--csub-gold-soft)] px-2.5 py-1 text-[var(--csub-gold)] hover:text-white hover:border-[var(--csub-light)] transition-colors"
+                          <div className="flex items-center gap-2 shrink-0">
+                            {selectedReportInsight.report.download_url && (
+                              <a
+                                href={selectedReportInsight.report.download_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs rounded-md border border-[var(--csub-gold-soft)] px-2.5 py-1 text-[var(--csub-gold)] hover:text-white hover:border-[var(--csub-light)] transition-colors"
+                              >
+                                Open PDF
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReportDeleteError(null)
+                                setReportDeleteConfirmId(selectedReportInsight.report.id)
+                              }}
+                              disabled={reportDeletePendingId === selectedReportInsight.report.id}
+                              className="text-xs rounded-md border border-[rgba(224,108,117,0.55)] px-2.5 py-1 text-[#f2b7bc] hover:text-white hover:border-[rgba(224,108,117,0.85)] transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                             >
-                              Open PDF
-                            </a>
-                          )}
+                              {reportDeletePendingId === selectedReportInsight.report.id ? 'Sletter...' : 'Slett rapport'}
+                            </button>
+                          </div>
                         </div>
 
                         <div className="mt-4">
@@ -2041,6 +2110,49 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </Panel>
         </section>
       </main>
+
+      {reportDeleteCandidate && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/65 z-[220]"
+            onClick={() => {
+              if (reportDeletePendingId) return
+              setReportDeleteConfirmId(null)
+            }}
+          />
+          <div className="fixed inset-0 z-[221] p-4 grid place-items-center">
+            <div className="w-full max-w-md rounded-xl border border-[rgba(224,108,117,0.5)] bg-[var(--csub-dark)] p-5 shadow-2xl">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-[#f2b7bc]">Bekreft sletting</p>
+              <h3 className="text-lg text-white mt-2">Slette markedsrapport permanent?</h3>
+              <p className="text-sm text-[var(--text-muted)] mt-2">
+                Denne handlingen kan ikke angres. Rapporten fjernes fra dashboardet og databasen.
+              </p>
+              <div className="mt-3 rounded-lg border border-[var(--csub-light-soft)] bg-[rgba(10,23,20,0.55)] px-3 py-2">
+                <p className="text-sm font-semibold text-white truncate">{reportDeleteCandidate.displayPeriod}</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">{formatReportDate(reportDeleteCandidate.report.created_at)}</p>
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setReportDeleteConfirmId(null)}
+                  disabled={Boolean(reportDeletePendingId)}
+                  className="rounded-md border border-[var(--csub-light-soft)] px-3 py-2 text-sm text-[var(--text-muted)] hover:text-white transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  Avbryt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteMarketReport(reportDeleteCandidate.report.id)}
+                  disabled={Boolean(reportDeletePendingId)}
+                  className="rounded-md border border-[rgba(224,108,117,0.75)] bg-[rgba(224,108,117,0.12)] px-3 py-2 text-sm text-[#f2b7bc] hover:text-white hover:bg-[rgba(224,108,117,0.2)] transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {reportDeletePendingId === reportDeleteCandidate.report.id ? 'Sletter...' : 'Ja, slett'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {drawerOpen && <div className="fixed inset-0 bg-black/50 z-[200]" onClick={closeDrawer} />}
       <div className={`fixed top-0 right-0 bottom-0 w-[520px] max-w-[90vw] bg-[var(--csub-dark)] z-[201] transition-transform duration-300 overflow-y-auto border-l border-[var(--csub-light-soft)] ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`}>
