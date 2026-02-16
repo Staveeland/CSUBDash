@@ -605,8 +605,18 @@ function mapSubseaRow(row: Record<string, unknown>, columns: string[], batchId: 
 }
 
 function mapAwardRow(row: Record<string, unknown>, columns: string[], batchId: string): Record<string, unknown> {
+  // upcoming_awards table does NOT have continent or distance_group columns
   return {
-    ...mapCommonFields(row, columns, batchId),
+    import_batch_id: batchId,
+    year: int(getCol(row, columns, 'Year')),
+    country: str(getCol(row, columns, 'Country')),
+    development_project: str(getCol(row, columns, 'Development Project')),
+    asset: str(getCol(row, columns, 'Asset')),
+    operator: str(getCol(row, columns, 'Operator')),
+    surf_contractor: str(getCol(row, columns, 'SURF Installation Contractor')),
+    facility_category: str(getCol(row, columns, 'Facility Category')),
+    field_type: str(getCol(row, columns, 'Field Type Category')),
+    water_depth_category: str(getCol(row, columns, 'Water Depth Category')),
     field_size_category: str(getCol(row, columns, 'Field Size Category')),
     xmts_awarded: int(getCol(row, columns, 'XMTs Awarded')),
   }
