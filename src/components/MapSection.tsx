@@ -76,7 +76,7 @@ function latLonToVector3(lat: number, lon: number, radius: number): [number, num
   return [x, y, z]
 }
 
-function EarthGlobe({ surfaceRef }: { surfaceRef: RefObject<THREE.Mesh | null> }) {
+function EarthGlobe({ surfaceRef }: { surfaceRef: RefObject<THREE.Mesh> }) {
   const earthTexture = useTexture('/textures/earth_atmos_2048.jpg')
   const correctedTexture = useMemo(() => {
     const clonedTexture = earthTexture.clone()
@@ -115,7 +115,7 @@ function EarthGlobe({ surfaceRef }: { surfaceRef: RefObject<THREE.Mesh | null> }
 
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
-  const globeSurfaceRef = useRef<THREE.Mesh | null>(null)
+  const globeSurfaceRef = useRef<THREE.Mesh>(null)
   const activeCountryKey = normalizeCountryName(activeCountry ?? '')
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
 
