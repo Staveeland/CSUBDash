@@ -866,18 +866,28 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const userLabel = getUserDisplayName(userEmail)
   const userInitials = getInitials(userLabel)
 
+  const [apiPipelineFlow, setApiPipelineFlow] = useState<{label: string; value: number}[]>([])
+
   const fetchData = useCallback(async () => {
     try {
-      const response = await fetch('/api/dashboard/projects')
-      const payload = await response.json()
-      if (!response.ok) {
-        throw new Error(payload?.error || `Dashboard API failed with status ${response.status}`)
+      const [projRes, chartsRes] = await Promise.all([
+        fetch('/api/dashboard/projects'),
+        fetch('/api/dashboard/charts'),
+      ])
+      const payload = await projRes.json()
+      if (!projRes.ok) {
+        throw new Error(payload?.error || `Dashboard API failed with status ${projRes.status}`)
       }
       if (!Array.isArray(payload)) {
         throw new Error('Dashboard API returned invalid format')
       }
       setProjects(payload)
       setLoadError(null)
+
+      if (chartsRes.ok) {
+        const chartsData = await chartsRes.json()
+        if (chartsData.pipelineFlow) setApiPipelineFlow(chartsData.pipelineFlow)
+      }
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
       setLoadError(error instanceof Error ? error.message : 'Unknown dashboard loading error')
@@ -1343,12 +1353,9 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const pipelineData = useMemo(() => buildPipelineByYear(viewProjects), [viewProjects])
 
   const pipelineFlowData = useMemo(() => {
-    // Use API-provided pipeline flow if available
-    const apiFlow = viewCharts.pipelineFlow
-    if (apiFlow && apiFlow.length > 0) return apiFlow
-    // Fallback
+    if (apiPipelineFlow.length > 0) return apiPipelineFlow
     return PIPELINE_FLOW.map((label) => ({ label, value: label === 'FEED' ? viewProjects.length : 0 }))
-  }, [viewCharts, viewProjects.length])
+  }, [apiPipelineFlow, viewProjects.length])
 
   const activityFeed = useMemo<ActivityItem[]>(() => {
     const timeline = ['2 timer siden', '5 timer siden', '1 dag siden', '2 dager siden', '3 dager siden']
