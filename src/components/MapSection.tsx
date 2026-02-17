@@ -89,7 +89,7 @@ function EarthGlobe() {
   return (
     <group>
       <mesh>
-        <sphereGeometry args={[2.05, 96, 96]} />
+        <sphereGeometry args={[2.22, 96, 96]} />
         <meshStandardMaterial
           map={correctedTexture}
           color="#d9e8e2"
@@ -101,7 +101,7 @@ function EarthGlobe() {
       </mesh>
 
       <mesh>
-        <sphereGeometry args={[2.12, 72, 72]} />
+        <sphereGeometry args={[2.3, 72, 72]} />
         <meshPhongMaterial
           color="#63bfa8"
           transparent
@@ -152,8 +152,6 @@ function FlagMarkers({
         if (!flagTexture) return null
         const isHovered = hoveredCountry === point.country
         const isRaised = point.isActive || isHovered
-        const buttonWidth = point.markerWidthWorld + 0.038
-        const buttonHeight = point.markerHeightWorld + 0.038
 
         return (
           <group key={point.country}>
@@ -162,36 +160,24 @@ function FlagMarkers({
               color={point.isActive ? '#c9a84c' : '#4db89e'}
               transparent
               opacity={point.isActive ? 0.72 : 0.45}
-              lineWidth={1}
+              lineWidth={1.2}
             />
 
             <Billboard follow position={point.markerPosition}>
               <group scale={isHovered ? 1.08 : 1}>
-                {isRaised && (
-                  <mesh position={[0, 0, -0.012]}>
-                    <planeGeometry args={[buttonWidth + 0.026, buttonHeight + 0.026]} />
-                    <meshBasicMaterial color="#c9a84c" transparent opacity={0.22} depthWrite={false} toneMapped={false} />
-                  </mesh>
-                )}
-
-                <mesh position={[0, -0.012, -0.01]}>
-                  <planeGeometry args={[buttonWidth + 0.03, buttonHeight + 0.03]} />
-                  <meshBasicMaterial color="#020a08" transparent opacity={0.4} depthWrite={false} toneMapped={false} />
+                <mesh position={[0, -0.01, -0.01]}>
+                  <circleGeometry args={[point.markerWidthWorld * 0.36, 24]} />
+                  <meshBasicMaterial color="#020a08" transparent opacity={0.3} depthWrite={false} toneMapped={false} />
                 </mesh>
-
                 <mesh position={[0, 0, -0.004]}>
-                  <planeGeometry args={[buttonWidth, buttonHeight]} />
+                  <circleGeometry args={[point.markerWidthWorld * 0.4, 32]} />
                   <meshBasicMaterial
-                    color={isRaised ? '#c9a84c' : '#194539'}
+                    color={isRaised ? '#c9a84c' : '#2c7864'}
                     transparent
-                    opacity={isRaised ? 0.94 : 0.84}
+                    opacity={isRaised ? 0.3 : 0.22}
+                    depthWrite={false}
                     toneMapped={false}
                   />
-                </mesh>
-
-                <mesh position={[0, 0, -0.001]}>
-                  <planeGeometry args={[buttonWidth - 0.016, buttonHeight - 0.016]} />
-                  <meshBasicMaterial color="#081a15" transparent opacity={0.96} toneMapped={false} />
                 </mesh>
 
                 <mesh
@@ -268,11 +254,11 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
 
       const [lat, lon] = coords
       const intensity = Math.sqrt((entry.count || 0) / maxCount)
-      const markerWidthWorld = 0.14 + intensity * 0.055 + (activeCountryKey === key ? 0.01 : 0)
+      const markerWidthWorld = 0.165 + intensity * 0.075 + (activeCountryKey === key ? 0.014 : 0)
       const markerHeightWorld = markerWidthWorld * 0.66
-      const anchorPosition = latLonToVector3(lat, lon, 2.08)
+      const anchorPosition = latLonToVector3(lat, lon, 2.24)
       const normal = new THREE.Vector3(anchorPosition[0], anchorPosition[1], anchorPosition[2]).normalize()
-      const markerLift = 0.14 + intensity * 0.08 + (activeCountryKey === key ? 0.03 : 0)
+      const markerLift = 0.18 + intensity * 0.11 + (activeCountryKey === key ? 0.04 : 0)
       const markerPosition: [number, number, number] = [
         anchorPosition[0] + normal.x * markerLift,
         anchorPosition[1] + normal.y * markerLift,
@@ -293,8 +279,8 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
   }, [activeCountryKey, countryData, maxCount])
 
   return (
-    <div className="relative w-full h-[400px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
-      <Canvas camera={{ position: [0, 0, 8.3], fov: 40 }} dpr={[1, 2]}>
+    <div className="relative w-full h-[430px] md:h-[460px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
+      <Canvas camera={{ position: [0, 0, 7.4], fov: 38 }} dpr={[1, 2]}>
         <color attach="background" args={['#0a211b']} />
         <ambientLight intensity={1.05} />
         <hemisphereLight args={['#b7e9dd', '#0b1d18', 0.8]} />
@@ -308,8 +294,8 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
         <OrbitControls
           enablePan={false}
           enableZoom
-          minDistance={4.8}
-          maxDistance={10}
+          minDistance={4.5}
+          maxDistance={9.3}
           rotateSpeed={0.65}
           zoomSpeed={0.65}
           enableDamping
