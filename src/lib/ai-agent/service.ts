@@ -453,7 +453,7 @@ async function buildAgentPlan(messages: AgentMessage[]): Promise<AgentPlan> {
 
   try {
     const response = await getOpenAIClient().chat.completions.create({
-      model: 'gpt-5.2',
+      model: 'gpt-4o',
       temperature: 0,
       max_completion_tokens: 1200,
       messages: [
@@ -1256,7 +1256,7 @@ async function generateAgentOutput(
 
   try {
     const response = await getOpenAIClient().chat.completions.create({
-      model: 'gpt-5.2',
+      model: 'gpt-4o',
       temperature: 0.2,
       max_completion_tokens: 6400,
       messages: [
