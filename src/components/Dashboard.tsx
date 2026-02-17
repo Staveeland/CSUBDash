@@ -64,6 +64,8 @@ interface Project {
   surf_km: number
   first_year: number
   last_year: number
+  data_source?: string
+  source?: string | null
   [key: string]: unknown
 }
 
@@ -422,6 +424,19 @@ function getProjectYear(project: Project): number | null {
   }
 
   return null
+}
+
+function getProjectDataSource(project: Project): string {
+  return typeof project.data_source === 'string' ? normalize(project.data_source) : ''
+}
+
+function getProjectSource(project: Project): string {
+  return typeof project.source === 'string' ? normalize(project.source) : ''
+}
+
+function isForecastPipelineRecord(project: Project): boolean {
+  if (getProjectDataSource(project) === 'project') return true
+  return getProjectSource(project) === 'rystad_forecast'
 }
 
 function buildProjectKey(project: Project): string {
@@ -1277,8 +1292,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const viewProjects = useMemo(() => {
     return regionProjects.filter((project) => {
       const year = getProjectYear(project)
-      if (!year) return view === 'historical'
-      if (view === 'historical') return year <= currentYear
+      const isForecastRecord = isForecastPipelineRecord(project)
+
+      if (view === 'historical') {
+        if (isForecastRecord) return false
+        if (!year) return true
+        return year <= currentYear
+      }
+
+      if (isForecastRecord) return true
+      if (!year) return false
       return year > currentYear
     })
   }, [regionProjects, view, currentYear])

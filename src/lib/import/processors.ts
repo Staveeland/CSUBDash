@@ -913,26 +913,8 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
       await upsertChunked(supabase, 'projects', projects, 'development_project,asset,country')
     }
 
-    // Create contract rows from awards
-    const contractRows = allAwards
-      .map((row) => ({
-        date: `${row.year}-01-01`,
-        supplier: (row.surf_contractor as string) || 'TBD',
-        operator: (row.operator as string) || 'Unknown',
-        project_name: (row.development_project as string) || 'Unknown',
-        description: `${row.xmts_awarded || 0} XMTs awarded - ${row.facility_category || 'N/A'}`,
-        contract_type: 'Subsea' as const,
-        region: row.country as string,
-        country: row.country as string,
-        source: 'rystad_forecast' as const,
-        pipeline_phase: 'feed' as const,
-        external_id: `rystad-award-${row.year}-${row.development_project}-${row.asset}`,
-      }))
-      .filter((row) => row.project_name !== 'Unknown')
-
-    if (contractRows.length > 0) {
-      await upsertChunked(supabase, 'contracts', contractRows, 'external_id')
-    }
+    // Intentionally do NOT insert forecast Excel rows into contracts:
+    // contracts drives historical awards views, while this import is future pipeline only.
 
     console.log(`[Excel import] Done — total: ${stats.total}, imported: ${stats.imported}, skipped: ${stats.skipped}`)
     await completeBatch(supabase, batchId, stats)
