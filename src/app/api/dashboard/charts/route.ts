@@ -10,19 +10,16 @@ export async function GET() {
 
     const [projectsRes, contractsRes, awardsRes, xmtRes, surfRes] = await Promise.all([
       fetchAll(supabase, 'projects', 'country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category, development_project'),
-      fetchAll(supabase, 'contracts', 'region, country, contract_type, award_date'),
+      fetchAll(supabase, 'contracts', 'region, country, contract_type, date'),
       fetchAll(supabase, 'upcoming_awards', 'development_project, xmts_awarded, year'),
       fetchAll(supabase, 'xmt_data', 'development_project, contract_award_year, xmt_count, state, year'),
       fetchAll(supabase, 'surf_data', 'year, km_surf_lines'),
     ])
 
     if (projectsRes.error) throw projectsRes.error
-    if (contractsRes.error) throw contractsRes.error
-    if (xmtRes.error) throw xmtRes.error
-    if (surfRes.error) throw surfRes.error
 
     const projects = projectsRes.data || []
-    const contracts = contractsRes.data || []
+    const contracts = contractsRes.error ? [] : contractsRes.data || []
 
     // By country
     const countryMap = new Map<string, number>()
@@ -63,9 +60,9 @@ export async function GET() {
       .sort((a, b) => a.year - b.year)
 
     // Pipeline flow (FEED → Tender → Award → Execution → Closed)
-    const awards = awardsRes.data || []
-    const xmts = xmtRes.data || []
-    const surfs = surfRes.data || []
+    const awards = awardsRes.error ? [] : awardsRes.data || []
+    const xmts = xmtRes.error ? [] : xmtRes.data || []
+    const surfs = surfRes.error ? [] : surfRes.data || []
     const currentYear = new Date().getFullYear()
 
     // Also fetch contracts for awarded count
