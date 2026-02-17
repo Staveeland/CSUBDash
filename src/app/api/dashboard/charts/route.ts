@@ -11,18 +11,21 @@ export async function GET() {
     // Use admin client to bypass RLS policies on new tables
     const adminClient = createAdminClient()
 
-    const [projectsRes, contractsRes, awardsRes, xmtRes] = await Promise.all([
+    const [projectsRes, contractsRes, awardsRes, xmtRes, surfRes] = await Promise.all([
       fetchAll(adminClient, 'projects', 'country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category, development_project'),
-      fetchAll(adminClient, 'contracts', 'region, country, contract_type, award_date'),
+      fetchAll(adminClient, 'contracts', 'region, country, contract_type, date'),
       fetchAll(adminClient, 'upcoming_awards', 'development_project, xmts_awarded, year'),
-      fetchAll(adminClient, 'xmt_data', 'development_project, contract_award_year, xmt_count, state'),
+      fetchAll(adminClient, 'xmt_data', 'development_project, contract_award_year, xmt_count, state, year'),
+      fetchAll(adminClient, 'surf_data', 'year, km_surf_lines'),
     ])
 
     if (projectsRes.error) throw projectsRes.error
-    if (contractsRes.error) throw contractsRes.error
 
     const projects = projectsRes.data || []
-    const contracts = contractsRes.data || []
+    const contracts = contractsRes.error ? [] : contractsRes.data || []
+    const awards = awardsRes.error ? [] : awardsRes.data || []
+    const xmts = xmtRes.error ? [] : xmtRes.data || []
+    const surfs = surfRes.error ? [] : surfRes.data || []
 
     // By country
     const countryMap = new Map<string, number>()
@@ -63,8 +66,6 @@ export async function GET() {
       .sort((a, b) => a.year - b.year)
 
     // Pipeline flow (FEED → Tender → Award → Execution → Closed)
-    const awards = awardsRes.data || []
-    const xmts = xmtRes.data || []
     const currentYear = new Date().getFullYear()
 
     // Also fetch contracts for awarded count
@@ -105,7 +106,53 @@ export async function GET() {
       { label: 'Closed', value: closedCount },
     ]
 
-    return NextResponse.json({ byCountry, byPhase, byDepth, byYear, pipelineFlow })
+    const xmtByYearMap = new Map<number, number>()
+    xmts.forEach((row) => {
+      const year = Number(row.year)
+      if (!Number.isFinite(year)) return
+      xmtByYearMap.set(year, (xmtByYearMap.get(year) ?? 0) + Number(row.xmt_count || 0))
+    })
+
+    const surfByYearMap = new Map<number, number>()
+    surfs.forEach((row) => {
+      const year = Number(row.year)
+      if (!Number.isFinite(year)) return
+      surfByYearMap.set(year, (surfByYearMap.get(year) ?? 0) + Number(row.km_surf_lines || 0))
+    })
+
+    const allYears = new Set<number>([
+      ...xmtByYearMap.keys(),
+      ...surfByYearMap.keys(),
+    ])
+
+    const sortedYears = Array.from(allYears.values()).sort((a, b) => a - b)
+
+    const xmtByYearProjectData = sortedYears
+      .map((year) => ({ year, value: xmtByYearMap.get(year) ?? 0 }))
+
+    const surfByYearProjectData = sortedYears
+      .map((year) => ({ year, value: surfByYearMap.get(year) ?? 0 }))
+
+    const pipelineValueByYear = sortedYears
+      .map((year) => {
+        const xmtValue = xmtByYearMap.get(year) ?? 0
+        const surfValue = surfByYearMap.get(year) ?? 0
+        return {
+          year,
+          value: surfValue * 1_000_000 + xmtValue * 120_000,
+        }
+      })
+
+    return NextResponse.json({
+      byCountry,
+      byPhase,
+      byDepth,
+      byYear,
+      pipelineFlow,
+      xmtByYearProjectData,
+      surfByYearProjectData,
+      pipelineValueByYear,
+    })
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 })
   }

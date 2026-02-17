@@ -122,10 +122,10 @@ async function upsertChunked(
   let imported = 0
   let skipped = 0
   const conflictColumns = onConflict.split(',').map((c) => c.trim())
+  const deduplicatedRows = deduplicateByConflictKey(rows, conflictColumns)
 
-  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-    const rawChunk = rows.slice(i, i + CHUNK_SIZE)
-    const chunk = deduplicateByConflictKey(rawChunk, conflictColumns)
+  for (let i = 0; i < deduplicatedRows.length; i += CHUNK_SIZE) {
+    const chunk = deduplicatedRows.slice(i, i + CHUNK_SIZE)
     const { data, error } = await supabase
       .from(table)
       .upsert(chunk, { onConflict, ignoreDuplicates: false })
@@ -142,16 +142,82 @@ async function upsertChunked(
   return { imported, skipped }
 }
 
-function parseSheet(workbook: XLSX.WorkBook, sheetName: string): Record<string, unknown>[] {
-  const sheet = workbook.Sheets[sheetName]
-  if (!sheet) return []
-  return XLSX.utils.sheet_to_json(sheet, { defval: null })
+type ParsedSheet = {
+  rows: Record<string, unknown>[]
+  columns: string[]
+  headerRowIndex: number
 }
 
-function findSheet(workbook: XLSX.WorkBook, ...prefixes: string[]): string | undefined {
-  return workbook.SheetNames.find((name) =>
-    prefixes.some((prefix) => name.toLowerCase().startsWith(prefix.toLowerCase()))
+function cellText(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  return String(value).trim()
+}
+
+function uniqueHeader(base: string, seen: Map<string, number>): string {
+  const count = seen.get(base) ?? 0
+  seen.set(base, count + 1)
+  if (count === 0) return base
+  return `${base} (${count + 1})`
+}
+
+/**
+ * Parse both normal tabular exports and Pivot/Cube exports where:
+ * - first row has "[Data Values]" + measure name
+ * - second row has actual dimension headers
+ */
+function parseSheet(workbook: XLSX.WorkBook, sheetName: string): ParsedSheet {
+  const sheet = workbook.Sheets[sheetName]
+  if (!sheet) return { rows: [], columns: [], headerRowIndex: -1 }
+
+  const matrix = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: null,
+    raw: true,
+  }) as unknown[][]
+
+  if (matrix.length === 0) return { rows: [], columns: [], headerRowIndex: -1 }
+
+  const detectedHeaderRowIndex = matrix.findIndex((row) =>
+    Array.isArray(row) && row.some((cell) => cellText(cell).toLowerCase() === 'year')
   )
+  const headerRowIndex = detectedHeaderRowIndex >= 0 ? detectedHeaderRowIndex : 0
+  const headerRow = (matrix[headerRowIndex] ?? []) as unknown[]
+  const valueRow = headerRowIndex > 0 ? ((matrix[headerRowIndex - 1] ?? []) as unknown[]) : []
+
+  const width = matrix.reduce((max, row) => {
+    if (!Array.isArray(row)) return max
+    return Math.max(max, row.length)
+  }, 0)
+
+  const seenHeaders = new Map<string, number>()
+  const columns: string[] = []
+  for (let i = 0; i < width; i++) {
+    const primary = cellText(headerRow[i])
+    const fallback = cellText(valueRow[i])
+    const fallbackHeader = fallback.toLowerCase() === '[data values]' ? '' : fallback
+    const base = primary || fallbackHeader || `Column_${i + 1}`
+    columns.push(uniqueHeader(base, seenHeaders))
+  }
+
+  const rows: Record<string, unknown>[] = []
+  for (const rawRow of matrix.slice(headerRowIndex + 1)) {
+    if (!Array.isArray(rawRow)) continue
+
+    const row: Record<string, unknown> = {}
+    let hasData = false
+
+    for (let i = 0; i < columns.length; i++) {
+      const value = rawRow[i] ?? null
+      row[columns[i]] = value
+      if (!hasData && value !== null && value !== undefined && cellText(value) !== '') {
+        hasData = true
+      }
+    }
+
+    if (hasData) rows.push(row)
+  }
+
+  return { rows, columns, headerRowIndex }
 }
 
 function str(v: unknown): string | null {
@@ -499,7 +565,7 @@ async function downloadJobBuffer(supabase: ReturnType<typeof createAdminClient>,
 // Smart column detection & fuzzy mapping
 // ---------------------------------------------------------------------------
 
-type DetectedType = 'xmt' | 'surf' | 'subsea' | 'awards'
+type DetectedType = 'xmt' | 'surf' | 'subsea' | 'manifold' | 'awards'
 
 /**
  * Find a column in `columns` that matches any of `patterns` (case-insensitive substring).
@@ -517,23 +583,32 @@ function fuzzyCol(columns: string[], ...patterns: string[]): string | undefined 
 /**
  * Detect what kind of Rystad data a sheet contains based on its column names.
  */
-function detectSheetType(columns: string[]): DetectedType | null {
+function detectSheetType(columns: string[], sheetName: string): DetectedType | null {
   const lower = columns.map((c) => c.toLowerCase())
 
   // Awards: "XMTs Awarded"
   if (lower.some((c) => c.includes('xmts awarded'))) return 'awards'
 
+  // Manifold tabs from cube exports
+  if (
+    lower.some((c) => c.includes('manifolds (# installed)')) ||
+    lower.some((c) => c.includes('manifold purpose')) ||
+    lower.some((c) => c.includes('manifold design type'))
+  ) return 'manifold'
+
   // Subsea units: "Subsea Unit Category" or count column like "Subsea units (# Installed)" / "Subsea Units"
   if (
     lower.some((c) => c.includes('subsea unit category')) ||
+    lower.some((c) => c.includes('subsea units (# installed)')) ||
     lower.some((c) => /subsea\s*units?\s*(\(|$)/i.test(c))
   ) return 'subsea'
 
-  // SURF: "SURF Line Group" or "SURF Line Purpose" or "KM Surf Lines" or "SURF Line Design Category"
+  // SURF: line dimensions + km measure
   if (
     lower.some((c) => c.includes('surf line group')) ||
     lower.some((c) => c.includes('surf line purpose')) ||
     lower.some((c) => c.includes('km surf lines')) ||
+    lower.some((c) => c.includes('surf lines (km installed)')) ||
     lower.some((c) => c.includes('surf line design category'))
   ) return 'surf'
 
@@ -543,6 +618,14 @@ function detectSheetType(columns: string[]): DetectedType | null {
     lower.some((c) => c.includes('xmt state')) ||
     lower.some((c) => /xmts?\s*(installed|\(#|$)/i.test(c))
   ) return 'xmt'
+
+  // Fallback to sheet name when columns are inconclusive
+  const sheet = sheetName.toLowerCase()
+  if (sheet.includes('award')) return 'awards'
+  if (sheet.includes('manifold')) return 'manifold'
+  if (sheet.includes('xmt')) return 'xmt'
+  if (sheet.includes('surf')) return 'surf'
+  if (sheet.includes('subsea')) return 'subsea'
 
   return null
 }
@@ -568,7 +651,7 @@ function mapCommonFields(
     development_project: str(getCol(row, columns, 'Development Project')),
     asset: str(getCol(row, columns, 'Asset')),
     operator: str(getCol(row, columns, 'Operator')),
-    surf_contractor: str(getCol(row, columns, 'SURF Installation Contractor')),
+    surf_contractor: str(getCol(row, columns, 'SURF Installation Contractor', 'SURF EPC Contractor')),
     facility_category: str(getCol(row, columns, 'Facility Category')),
     field_type: str(getCol(row, columns, 'Field Type Category')),
     water_depth_category: str(getCol(row, columns, 'Water Depth Category')),
@@ -590,9 +673,9 @@ function mapXmtRow(row: Record<string, unknown>, columns: string[], batchId: str
 function mapSurfRow(row: Record<string, unknown>, columns: string[], batchId: string): Record<string, unknown> {
   return {
     ...mapCommonFields(row, columns, batchId),
-    design_category: str(getCol(row, columns, 'SURF Line Design Category')) || '',
+    design_category: str(getCol(row, columns, 'SURF Line Design Category', 'SURF Line Purpose')) || '',
     line_group: str(getCol(row, columns, 'SURF Line Group')) || '',
-    km_surf_lines: num(getCol(row, columns, 'KM Surf Lines')),
+    km_surf_lines: num(getCol(row, columns, 'KM Surf Lines', 'SURF lines (km Installed)')),
   }
 }
 
@@ -600,7 +683,20 @@ function mapSubseaRow(row: Record<string, unknown>, columns: string[], batchId: 
   return {
     ...mapCommonFields(row, columns, batchId),
     unit_category: str(getCol(row, columns, 'Subsea Unit Category')) || '',
-    unit_count: int(getCol(row, columns, 'Subsea units (# Installed)', 'Subsea Units', 'Subsea units')),
+    unit_count: int(getCol(row, columns, 'Subsea units (# Installed)', 'Subsea Units', 'Subsea units', 'Subsea Units (# Installed)')),
+  }
+}
+
+function mapManifoldRow(row: Record<string, unknown>, columns: string[], batchId: string): Record<string, unknown> {
+  const purpose = str(getCol(row, columns, 'Manifold Purpose'))
+  const designType = str(getCol(row, columns, 'Manifold Design Type'))
+  const baseCategory = designType ? `Manifold - ${designType}` : 'Manifold'
+  const unitCategory = purpose ? `${baseCategory} (${purpose})` : baseCategory
+
+  return {
+    ...mapCommonFields(row, columns, batchId),
+    unit_category: unitCategory,
+    unit_count: int(getCol(row, columns, 'Manifolds (# Installed)', 'Manifolds installed', 'Manifolds')),
   }
 }
 
@@ -613,12 +709,44 @@ function mapAwardRow(row: Record<string, unknown>, columns: string[], batchId: s
     development_project: str(getCol(row, columns, 'Development Project')),
     asset: str(getCol(row, columns, 'Asset')),
     operator: str(getCol(row, columns, 'Operator')),
-    surf_contractor: str(getCol(row, columns, 'SURF Installation Contractor')),
+    surf_contractor: str(getCol(row, columns, 'SURF Installation Contractor', 'SURF EPC Contractor')),
     facility_category: str(getCol(row, columns, 'Facility Category')),
     field_type: str(getCol(row, columns, 'Field Type Category')),
     water_depth_category: str(getCol(row, columns, 'Water Depth Category')),
     field_size_category: str(getCol(row, columns, 'Field Size Category')),
     xmts_awarded: int(getCol(row, columns, 'XMTs Awarded')),
+  }
+}
+
+async function deleteAllRows(
+  supabase: ReturnType<typeof createAdminClient>,
+  table: 'xmt_data' | 'surf_data' | 'subsea_unit_data' | 'upcoming_awards' | 'projects'
+) {
+  const { error } = await supabase
+    .from(table)
+    .delete()
+    .not('id', 'is', null)
+
+  if (error) {
+    throw new Error(`Could not clear ${table}: ${error.message}`)
+  }
+}
+
+async function resetForecastProjectData(supabase: ReturnType<typeof createAdminClient>) {
+  // Hard reset of "Kommende prosjekter" dataset before re-import to avoid stale rows.
+  await deleteAllRows(supabase, 'xmt_data')
+  await deleteAllRows(supabase, 'surf_data')
+  await deleteAllRows(supabase, 'subsea_unit_data')
+  await deleteAllRows(supabase, 'upcoming_awards')
+  await deleteAllRows(supabase, 'projects')
+
+  const { error: contractsError } = await supabase
+    .from('contracts')
+    .delete()
+    .eq('source', 'rystad_forecast')
+
+  if (contractsError) {
+    throw new Error(`Could not clear forecast contracts: ${contractsError.message}`)
   }
 }
 
@@ -638,22 +766,19 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
     const allXmt: Record<string, unknown>[] = []
     const allSurf: Record<string, unknown>[] = []
     const allSubsea: Record<string, unknown>[] = []
+    const allManifolds: Record<string, unknown>[] = []
     const allAwards: Record<string, unknown>[] = []
 
     for (const sheetName of workbook.SheetNames) {
-      const rows = parseSheet(workbook, sheetName) as Record<string, unknown>[]
-      if (rows.length === 0) continue
+      const parsedSheet = parseSheet(workbook, sheetName)
+      const rows = parsedSheet.rows
+      const columns = parsedSheet.columns
+      if (rows.length === 0 || columns.length === 0) continue
 
-      const columns = Object.keys(rows[0])
-      let detectedType = detectSheetType(columns)
-
-      // Fallback: try sheet name for awards (handles "Upcomming awards ..." variants)
-      if (!detectedType && /awards?/i.test(sheetName)) {
-        detectedType = 'awards'
-      }
+      const detectedType = detectSheetType(columns, sheetName)
 
       if (!detectedType) {
-        console.log(`[Excel import] Sheet "${sheetName}" — could not detect data type, skipping (columns: ${columns.join(', ')})`)
+        console.log(`[Excel import] Sheet "${sheetName}" — unsupported format, skipping (columns: ${columns.join(', ')})`)
         continue
       }
 
@@ -678,6 +803,12 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
             if (mapped.development_project) allSubsea.push(mapped)
           }
           break
+        case 'manifold':
+          for (const r of rows) {
+            const mapped = mapManifoldRow(r, columns, batchId)
+            if (mapped.development_project) allManifolds.push(mapped)
+          }
+          break
         case 'awards':
           for (const r of rows) {
             const mapped = mapAwardRow(r, columns, batchId)
@@ -686,6 +817,19 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
           break
       }
     }
+
+    const totalDetectedRows =
+      allXmt.length +
+      allSurf.length +
+      allSubsea.length +
+      allManifolds.length +
+      allAwards.length
+
+    if (totalDetectedRows === 0) {
+      throw new Error(`No valid forecast sheets detected in ${job.file_name}.`)
+    }
+
+    await resetForecastProjectData(supabase)
 
     // Upsert each data type
     if (allXmt.length > 0) {
@@ -704,12 +848,13 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
       console.log(`[Excel import] SURF: ${r.imported} imported, ${r.skipped} skipped`)
     }
 
-    if (allSubsea.length > 0) {
-      stats.total += allSubsea.length
-      const r = await upsertChunked(supabase, 'subsea_unit_data', allSubsea, 'year,development_project,asset,unit_category')
+    const allSubseaUnits = [...allSubsea, ...allManifolds]
+    if (allSubseaUnits.length > 0) {
+      stats.total += allSubseaUnits.length
+      const r = await upsertChunked(supabase, 'subsea_unit_data', allSubseaUnits, 'year,development_project,asset,unit_category')
       stats.imported += r.imported
       stats.skipped += r.skipped
-      console.log(`[Excel import] Subsea: ${r.imported} imported, ${r.skipped} skipped`)
+      console.log(`[Excel import] Subsea/Manifolds: ${r.imported} imported, ${r.skipped} skipped`)
     }
 
     if (allAwards.length > 0) {
@@ -725,7 +870,7 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
     const taggedRows: Array<Record<string, unknown> & { _type: string }> = [
       ...allXmt.map((row) => ({ ...row, _type: 'xmt' })),
       ...allSurf.map((row) => ({ ...row, _type: 'surf' })),
-      ...allSubsea.map((row) => ({ ...row, _type: 'subsea' })),
+      ...allSubseaUnits.map((row) => ({ ...row, _type: 'subsea' })),
       ...allAwards.map((row) => ({ ...row, _type: 'award' })),
     ]
 
@@ -768,26 +913,8 @@ async function processExcelJob(supabase: ReturnType<typeof createAdminClient>, j
       await upsertChunked(supabase, 'projects', projects, 'development_project,asset,country')
     }
 
-    // Create contract rows from awards
-    const contractRows = allAwards
-      .map((row) => ({
-        date: `${row.year}-01-01`,
-        supplier: (row.surf_contractor as string) || 'TBD',
-        operator: (row.operator as string) || 'Unknown',
-        project_name: (row.development_project as string) || 'Unknown',
-        description: `${row.xmts_awarded || 0} XMTs awarded - ${row.facility_category || 'N/A'}`,
-        contract_type: 'Subsea' as const,
-        region: row.country as string,
-        country: row.country as string,
-        source: 'rystad_forecast' as const,
-        pipeline_phase: 'feed' as const,
-        external_id: `rystad-award-${row.year}-${row.development_project}-${row.asset}`,
-      }))
-      .filter((row) => row.project_name !== 'Unknown')
-
-    if (contractRows.length > 0) {
-      await upsertChunked(supabase, 'contracts', contractRows, 'external_id')
-    }
+    // Intentionally do NOT insert forecast Excel rows into contracts:
+    // contracts drives historical awards views, while this import is future pipeline only.
 
     console.log(`[Excel import] Done — total: ${stats.total}, imported: ${stats.imported}, skipped: ${stats.skipped}`)
     await completeBatch(supabase, batchId, stats)

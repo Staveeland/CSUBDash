@@ -1,7 +1,9 @@
 'use client'
 
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
-import 'leaflet/dist/leaflet.css'
+import { Canvas } from '@react-three/fiber'
+import { Billboard, Html, Line, OrbitControls, Stars, useTexture } from '@react-three/drei'
+import { useEffect, useMemo, useState } from 'react'
+import * as THREE from 'three'
 
 const COUNTRY_COORDS: Record<string, [number, number]> = {
   'Australia':[-25,134],'Angola':[-12.5,18.5],'Brazil':[-14,-51],'Brasil':[-14,-51],
@@ -19,66 +21,298 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
   'Romania':[45.9,24.9],'Russia':[61,105],
 }
 
+const COUNTRY_FLAGS: Record<string, string> = {
+  'Australia':'au','Angola':'ao','Brazil':'br','Brasil':'br',
+  'Norway':'no','Norge':'no','UK':'gb','USA':'us','Qatar':'qa',
+  'Saudi Arabia':'sa','UAE':'ae','Nigeria':'ng','Ghana':'gh',
+  'Mozambique':'mz','Egypt':'eg','India':'in','Malaysia':'my',
+  'Indonesia':'id','Mexico':'mx','Trinidad':'tt',
+  'Guyana':'gy','Canada':'ca','Italy':'it','Turkey':'tr',
+  'Oman':'om','Kuwait':'kw','Azerbaijan':'az',
+  'Senegal':'sn','Ivory Coast':'ci','Suriname':'sr',
+  'Argentina':'ar','China':'cn','Thailand':'th',
+  'Vietnam':'vn','Philippines':'ph','Myanmar':'mm',
+  'United States':'us','United States of America':'us','United Kingdom':'gb','Great Britain':'gb','United Arab Emirates':'ae',
+  'Congo':'cg','Gabon':'ga','Ireland':'ie','Namibia':'na',
+  'Romania':'ro','Russia':'ru',
+}
+
 interface Props {
   countryData: { country: string; count: number }[]
   onCountrySelect?: (country: string) => void
   activeCountry?: string | null
 }
 
-export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
-  const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
+interface GlobePoint {
+  country: string
+  count: number
+  anchorPosition: [number, number, number]
+  markerPosition: [number, number, number]
+  flagCode: string
+  isActive: boolean
+  markerWidthWorld: number
+  markerHeightWorld: number
+}
+
+function normalizeCountryName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+const COUNTRY_COORDS_BY_KEY = new Map<string, [number, number]>(
+  Object.entries(COUNTRY_COORDS).map(([country, coords]) => [normalizeCountryName(country), coords]),
+)
+
+const COUNTRY_FLAGS_BY_KEY = new Map<string, string>(
+  Object.entries(COUNTRY_FLAGS).map(([country, code]) => [normalizeCountryName(country), code]),
+)
+
+function latLonToVector3(lat: number, lon: number, radius: number): [number, number, number] {
+  const phi = (90 - lat) * (Math.PI / 180)
+  const theta = (lon + 180) * (Math.PI / 180)
+
+  const x = -(radius * Math.sin(phi) * Math.cos(theta))
+  const y = radius * Math.cos(phi)
+  const z = radius * Math.sin(phi) * Math.sin(theta)
+
+  return [x, y, z]
+}
+
+function EarthGlobe() {
+  const earthTexture = useTexture('/textures/earth_atmos_2048.jpg')
+  const correctedTexture = useMemo(() => {
+    const clonedTexture = earthTexture.clone()
+    clonedTexture.colorSpace = THREE.SRGBColorSpace
+    clonedTexture.needsUpdate = true
+    return clonedTexture
+  }, [earthTexture])
 
   return (
-    <div className="relative w-full h-[400px] rounded-xl overflow-hidden z-0 border border-[var(--csub-light-soft)] shadow-lg">
-      <MapContainer
-        center={[20, 0]}
-        zoom={2}
-        scrollWheelZoom={false}
-        className="w-full h-full bg-[var(--bg-dark)]"
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          subdomains="abcd"
+    <group>
+      <mesh>
+        <sphereGeometry args={[2.22, 96, 96]} />
+        <meshStandardMaterial
+          map={correctedTexture}
+          color="#d9e8e2"
+          roughness={0.92}
+          metalness={0.02}
+          emissive="#123229"
+          emissiveIntensity={0.2}
         />
-        {countryData.map((entry) => {
-          const coords = COUNTRY_COORDS[entry.country]
-          if (!coords) return null
-          const isActive = (activeCountry ?? '').trim().toLowerCase() === entry.country.trim().toLowerCase()
-          const radius = Math.max(6, Math.sqrt(entry.count / maxCount) * 30) + (isActive ? 2 : 0)
-          return (
-            <CircleMarker
-              key={entry.country}
-              center={coords}
-              radius={radius}
-              eventHandlers={{
-                click: () => {
-                  onCountrySelect?.(entry.country)
-                },
-              }}
-              pathOptions={{
-                fillColor: isActive ? '#c9a84c' : '#4db89e',
-                color: isActive ? '#3d3212' : '#0e2620',
-                weight: 1.5,
-                opacity: 0.9,
-                fillOpacity: isActive ? 0.85 : 0.6,
-              }}
-            >
-              <Popup>
-                <strong>{entry.country}</strong>
-                <br />
-                {entry.count} prosjekter
-                {onCountrySelect && (
-                  <>
-                    <br />
-                    Klikk for detaljer
-                  </>
-                )}
-              </Popup>
-            </CircleMarker>
-          )
-        })}
-      </MapContainer>
+      </mesh>
+
+      <mesh>
+        <sphereGeometry args={[2.3, 72, 72]} />
+        <meshPhongMaterial
+          color="#63bfa8"
+          transparent
+          opacity={0.09}
+          side={THREE.BackSide}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function FlagMarkers({
+  points,
+  onCountrySelect,
+}: {
+  points: GlobePoint[]
+  onCountrySelect?: (country: string) => void
+}) {
+  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
+  const flagCodes = useMemo(() => Array.from(new Set(points.map((point) => point.flagCode))), [points])
+  const flagTextureUrls = useMemo(() => flagCodes.map((code) => `https://flagcdn.com/w160/${code}.png`), [flagCodes])
+  const loadedTextures = useTexture(flagTextureUrls)
+
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = 'auto'
+    }
+  }, [])
+
+  const textureByCode = useMemo(() => {
+    const map = new Map<string, THREE.Texture>()
+    flagCodes.forEach((code, index) => {
+      const texture = loadedTextures[index]
+      if (!texture) return
+      const clonedTexture = texture.clone()
+      clonedTexture.colorSpace = THREE.SRGBColorSpace
+      clonedTexture.needsUpdate = true
+      map.set(code, clonedTexture)
+    })
+    return map
+  }, [flagCodes, loadedTextures])
+
+  return (
+    <>
+      {points.map((point) => {
+        const flagTexture = textureByCode.get(point.flagCode)
+        if (!flagTexture) return null
+        const isHovered = hoveredCountry === point.country
+        const isRaised = point.isActive || isHovered
+        const showLabel = point.isActive || isHovered
+
+        return (
+          <group key={point.country}>
+            <Line
+              points={[point.anchorPosition, point.markerPosition]}
+              color={point.isActive ? '#c9a84c' : '#4db89e'}
+              transparent
+              opacity={point.isActive ? 0.72 : 0.45}
+              lineWidth={1.2}
+            />
+
+            <Billboard follow position={point.markerPosition}>
+              <group scale={isHovered ? 1.08 : 1}>
+                <mesh position={[0, -0.01, -0.01]}>
+                  <circleGeometry args={[point.markerWidthWorld * 0.36, 24]} />
+                  <meshBasicMaterial color="#020a08" transparent opacity={0.3} depthWrite={false} toneMapped={false} />
+                </mesh>
+                <mesh position={[0, 0, -0.004]}>
+                  <circleGeometry args={[point.markerWidthWorld * 0.4, 32]} />
+                  <meshBasicMaterial
+                    color={isRaised ? '#c9a84c' : '#2c7864'}
+                    transparent
+                    opacity={isRaised ? 0.3 : 0.22}
+                    depthWrite={false}
+                    toneMapped={false}
+                  />
+                </mesh>
+
+                <mesh
+                  position={[0, 0, 0.004]}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onPointerOver={(event) => {
+                    event.stopPropagation()
+                    setHoveredCountry(point.country)
+                    document.body.style.cursor = 'pointer'
+                  }}
+                  onPointerOut={(event) => {
+                    event.stopPropagation()
+                    document.body.style.cursor = 'auto'
+                    setHoveredCountry((prev) => (prev === point.country ? null : prev))
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onCountrySelect?.(point.country)
+                  }}
+                >
+                  <planeGeometry args={[point.markerWidthWorld, point.markerHeightWorld]} />
+                  <meshBasicMaterial map={flagTexture} transparent toneMapped={false} />
+                </mesh>
+              </group>
+            </Billboard>
+
+            {showLabel && (
+              <Html
+                position={[
+                  point.markerPosition[0],
+                  point.markerPosition[1] + point.markerHeightWorld * 0.95 + 0.02,
+                  point.markerPosition[2],
+                ]}
+                transform
+                sprite
+                occlude={true}
+                distanceFactor={15}
+                zIndexRange={[80, 0]}
+              >
+                <div
+                  style={{
+                    pointerEvents: 'none',
+                    whiteSpace: 'nowrap',
+                    padding: point.isActive ? '4px 8px' : '3px 7px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(201,168,76,0.5)',
+                    backgroundColor: 'rgba(9,20,18,0.82)',
+                    color: '#d7ece7',
+                    fontSize: point.isActive ? '10px' : '9px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  {point.isActive ? (
+                    <>
+                      <strong>{point.country}</strong> • {point.count} prosjekter
+                    </>
+                  ) : (
+                    <strong>{point.country}</strong>
+                  )}
+                </div>
+              </Html>
+            )}
+          </group>
+        )
+      })}
+    </>
+  )
+}
+
+export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
+  const activeCountryKey = normalizeCountryName(activeCountry ?? '')
+  const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
+
+  const points = useMemo<GlobePoint[]>(() => {
+    return countryData.flatMap((entry) => {
+      const key = normalizeCountryName(entry.country)
+      const coords = COUNTRY_COORDS_BY_KEY.get(key)
+      const flagCode = COUNTRY_FLAGS_BY_KEY.get(key)
+      if (!coords || !flagCode) return []
+
+      const [lat, lon] = coords
+      const intensity = Math.sqrt((entry.count || 0) / maxCount)
+      const markerWidthWorld = 0.165 + intensity * 0.075 + (activeCountryKey === key ? 0.014 : 0)
+      const markerHeightWorld = markerWidthWorld * 0.66
+      const anchorPosition = latLonToVector3(lat, lon, 2.24)
+      const normal = new THREE.Vector3(anchorPosition[0], anchorPosition[1], anchorPosition[2]).normalize()
+      const markerLift = 0.18 + intensity * 0.11 + (activeCountryKey === key ? 0.04 : 0)
+      const markerPosition: [number, number, number] = [
+        anchorPosition[0] + normal.x * markerLift,
+        anchorPosition[1] + normal.y * markerLift,
+        anchorPosition[2] + normal.z * markerLift,
+      ]
+
+      return [{
+        country: entry.country,
+        count: entry.count,
+        anchorPosition,
+        markerPosition,
+        flagCode,
+        isActive: activeCountryKey === key,
+        markerWidthWorld,
+        markerHeightWorld,
+      }]
+    })
+  }, [activeCountryKey, countryData, maxCount])
+
+  return (
+    <div className="relative w-full h-[430px] md:h-[460px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
+      <Canvas camera={{ position: [0, 0, 7.4], fov: 38 }} dpr={[1, 2]}>
+        <color attach="background" args={['#0a211b']} />
+        <ambientLight intensity={1.05} />
+        <hemisphereLight args={['#b7e9dd', '#0b1d18', 0.8]} />
+        <directionalLight position={[7, 5, 4]} intensity={1.4} color="#b9ece0" />
+        <directionalLight position={[-6, -4, -5]} intensity={0.55} color="#4db89e" />
+
+        <Stars radius={70} depth={30} count={1100} factor={2} saturation={0} fade speed={0.25} />
+        <EarthGlobe />
+        <FlagMarkers points={points} onCountrySelect={onCountrySelect} />
+
+        <OrbitControls
+          enablePan={false}
+          enableZoom
+          minDistance={4.5}
+          maxDistance={9.3}
+          rotateSpeed={0.65}
+          zoomSpeed={0.65}
+          enableDamping
+          dampingFactor={0.08}
+        />
+      </Canvas>
+
+      <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-[var(--csub-light-soft)] bg-[rgba(8,20,17,0.8)] px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+        Hold mouse to rotate globe
+      </div>
     </div>
   )
 }

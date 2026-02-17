@@ -39,6 +39,7 @@ export async function GET() {
           contract_name,
           description,
           contract_type,
+          source,
           country,
           region,
           operator,
@@ -100,6 +101,7 @@ export async function GET() {
         last_year: contractYear,
         award_date: contract.award_date || null,
         created_at: contract.created_at || null,
+        source: contract.source || null,
         data_source: 'contract',
       }
     })
