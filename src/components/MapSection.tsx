@@ -1,8 +1,9 @@
 'use client'
 
-import { DivIcon } from 'leaflet'
-import { MapContainer, TileLayer, Marker, Popup, Tooltip } from 'react-leaflet'
-import 'leaflet/dist/leaflet.css'
+import { Canvas } from '@react-three/fiber'
+import { Html, OrbitControls, Sphere, Stars, useTexture } from '@react-three/drei'
+import { useMemo, useState } from 'react'
+import * as THREE from 'three'
 
 const COUNTRY_COORDS: Record<string, [number, number]> = {
   'Australia':[-25,134],'Angola':[-12.5,18.5],'Brazil':[-14,-51],'Brasil':[-14,-51],
@@ -36,6 +37,21 @@ const COUNTRY_FLAGS: Record<string, string> = {
   'Romania':'ro','Russia':'ru',
 }
 
+interface Props {
+  countryData: { country: string; count: number }[]
+  onCountrySelect?: (country: string) => void
+  activeCountry?: string | null
+}
+
+interface GlobePoint {
+  country: string
+  count: number
+  position: [number, number, number]
+  flagEmoji: string
+  isActive: boolean
+  markerSize: number
+}
+
 function normalizeCountryName(value: string): string {
   return value.trim().toLowerCase()
 }
@@ -45,95 +61,177 @@ const COUNTRY_COORDS_BY_KEY = new Map<string, [number, number]>(
 )
 
 const COUNTRY_FLAGS_BY_KEY = new Map<string, string>(
-  Object.entries(COUNTRY_FLAGS).map(([country, flagCode]) => [normalizeCountryName(country), flagCode]),
+  Object.entries(COUNTRY_FLAGS).map(([country, code]) => [normalizeCountryName(country), code]),
 )
 
-const FLAG_ICON_CACHE = new Map<string, DivIcon>()
+function latLonToVector3(lat: number, lon: number, radius: number): [number, number, number] {
+  const phi = (90 - lat) * (Math.PI / 180)
+  const theta = (lon + 180) * (Math.PI / 180)
 
-function createFlagIcon(flagCode: string, flagHeight: number, isActive: boolean): DivIcon {
-  const width = Math.round(flagHeight * 1.35)
-  const activeStyle = isActive
-    ? 'border-color:#c9a84c;box-shadow:0 0 0 2px rgba(201,168,76,0.5),0 4px 10px rgba(0,0,0,0.45);'
-    : 'border-color:#4db89e;box-shadow:0 2px 8px rgba(0,0,0,0.35);'
-  const cacheKey = `${flagCode}-${width}-${flagHeight}-${isActive ? 'active' : 'default'}`
-  const cached = FLAG_ICON_CACHE.get(cacheKey)
-  if (cached) return cached
+  const x = -(radius * Math.sin(phi) * Math.cos(theta))
+  const y = radius * Math.cos(phi)
+  const z = radius * Math.sin(phi) * Math.sin(theta)
 
-  const icon = new DivIcon({
-    className: 'country-flag-icon',
-    iconSize: [width, flagHeight],
-    iconAnchor: [Math.round(width / 2), Math.round(flagHeight / 2)],
-    popupAnchor: [0, -Math.round(flagHeight / 2)],
-    tooltipAnchor: [0, -Math.round(flagHeight / 2)],
-    html: `<span style="display:block;width:${width}px;height:${flagHeight}px;border:2px solid;border-radius:4px;overflow:hidden;background:#10231d;${activeStyle}"><img src="https://flagcdn.com/w80/${flagCode}.png" alt="" style="display:block;width:100%;height:100%;object-fit:cover;" loading="lazy" /></span>`,
-  })
-
-  FLAG_ICON_CACHE.set(cacheKey, icon)
-  return icon
+  return [x, y, z]
 }
 
-interface Props {
-  countryData: { country: string; count: number }[]
-  onCountrySelect?: (country: string) => void
-  activeCountry?: string | null
+function countryCodeToEmoji(countryCode: string): string {
+  return countryCode
+    .toUpperCase()
+    .slice(0, 2)
+    .split('')
+    .map((char) => String.fromCodePoint(127397 + char.charCodeAt(0)))
+    .join('')
+}
+
+function EarthGlobe() {
+  const earthTexture = useTexture('/textures/earth_atmos_2048.jpg')
+
+  return (
+    <group>
+      <Sphere args={[2.45, 96, 96]}>
+        <meshStandardMaterial
+          map={earthTexture}
+          roughness={0.82}
+          metalness={0.1}
+          emissive="#0a1b16"
+          emissiveIntensity={0.08}
+        />
+      </Sphere>
+
+      <Sphere args={[2.52, 72, 72]}>
+        <meshPhongMaterial
+          color="#63bfa8"
+          transparent
+          opacity={0.11}
+          side={THREE.BackSide}
+          depthWrite={false}
+        />
+      </Sphere>
+    </group>
+  )
 }
 
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
-  const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
+  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
   const activeCountryKey = normalizeCountryName(activeCountry ?? '')
+  const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
+
+  const points = useMemo<GlobePoint[]>(() => {
+    return countryData.flatMap((entry) => {
+      const key = normalizeCountryName(entry.country)
+      const coords = COUNTRY_COORDS_BY_KEY.get(key)
+      const flagCode = COUNTRY_FLAGS_BY_KEY.get(key)
+      if (!coords || !flagCode) return []
+
+      const [lat, lon] = coords
+      const position = latLonToVector3(lat, lon, 2.62)
+      const intensity = Math.sqrt((entry.count || 0) / maxCount)
+      const markerSize = 26 + intensity * 16
+
+      return [{
+        country: entry.country,
+        count: entry.count,
+        position,
+        flagEmoji: countryCodeToEmoji(flagCode),
+        isActive: activeCountryKey === key,
+        markerSize,
+      }]
+    })
+  }, [activeCountryKey, countryData, maxCount])
 
   return (
-    <div className="relative w-full h-[400px] rounded-xl overflow-hidden z-0 border border-[var(--csub-light-soft)] shadow-lg">
-      <MapContainer
-        center={[20, 0]}
-        zoom={2}
-        scrollWheelZoom={false}
-        className="w-full h-full bg-[var(--bg-dark)]"
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          subdomains="abcd"
-        />
-        {countryData.map((entry) => {
-          const countryKey = normalizeCountryName(entry.country)
-          const coords = COUNTRY_COORDS_BY_KEY.get(countryKey)
-          const flagCode = COUNTRY_FLAGS_BY_KEY.get(countryKey)
-          if (!coords || !flagCode) return null
+    <div className="relative w-full h-[400px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
+      <Canvas camera={{ position: [0, 0, 7], fov: 40 }} dpr={[1, 2]}>
+        <color attach="background" args={['#071610']} />
+        <fog attach="fog" args={['#071610', 6.5, 12]} />
+        <ambientLight intensity={0.75} />
+        <directionalLight position={[7, 5, 4]} intensity={1.15} color="#9fdccf" />
+        <directionalLight position={[-6, -4, -5]} intensity={0.35} color="#4db89e" />
 
-          const isActive = activeCountryKey === countryKey
-          const intensity = Math.sqrt((entry.count || 0) / maxCount)
-          const flagHeight = Math.min(40, Math.max(18, Math.round(18 + intensity * 16 + (isActive ? 4 : 0))))
+        <Stars radius={70} depth={30} count={1500} factor={2.2} saturation={0} fade speed={0.3} />
+        <EarthGlobe />
+
+        {points.map((point) => {
+          const isHovered = hoveredCountry === point.country
+          const borderColor = point.isActive ? '#c9a84c' : '#4db89e'
+          const scale = isHovered || point.isActive ? 1.18 : 1
 
           return (
-            <Marker
-              key={entry.country}
-              position={coords}
-              icon={createFlagIcon(flagCode, flagHeight, isActive)}
-              eventHandlers={{
-                click: () => {
-                  onCountrySelect?.(entry.country)
-                },
-              }}
-            >
-              <Tooltip direction="top" offset={[0, -Math.round(flagHeight * 0.65)]}>
-                {entry.country}
-              </Tooltip>
-              <Popup>
-                <strong>{entry.country}</strong>
-                <br />
-                {entry.count} prosjekter
-                {onCountrySelect && (
-                  <>
-                    <br />
-                    Klikk for detaljer
-                  </>
-                )}
-              </Popup>
-            </Marker>
+            <group key={point.country} position={point.position}>
+              <Html transform sprite distanceFactor={14} zIndexRange={[120, 0]}>
+                <button
+                  type="button"
+                  onMouseEnter={() => setHoveredCountry(point.country)}
+                  onMouseLeave={() => setHoveredCountry((current) => current === point.country ? null : current)}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onCountrySelect?.(point.country)
+                  }}
+                  style={{
+                    width: `${point.markerSize}px`,
+                    height: `${Math.round(point.markerSize * 0.78)}px`,
+                    transform: `scale(${scale})`,
+                    transformOrigin: 'center',
+                    border: `2px solid ${borderColor}`,
+                    borderRadius: '4px',
+                    backgroundColor: '#10231d',
+                    display: 'grid',
+                    placeItems: 'center',
+                    cursor: 'pointer',
+                    boxShadow: point.isActive
+                      ? '0 0 0 2px rgba(201,168,76,0.35), 0 4px 14px rgba(0,0,0,0.45)'
+                      : '0 3px 10px rgba(0,0,0,0.4)',
+                    transition: 'transform 120ms ease, border-color 120ms ease',
+                    fontSize: `${Math.round(point.markerSize * 0.62)}px`,
+                    lineHeight: 1,
+                  }}
+                  aria-label={`${point.country} (${point.count} prosjekter)`}
+                  title={`${point.country}: ${point.count} prosjekter`}
+                >
+                  <span>{point.flagEmoji}</span>
+                </button>
+              </Html>
+
+              {(isHovered || point.isActive) && (
+                <Html position={[0, 0.27, 0]} transform sprite distanceFactor={16} zIndexRange={[140, 0]}>
+                  <div
+                    style={{
+                      pointerEvents: 'none',
+                      whiteSpace: 'nowrap',
+                      padding: '6px 10px',
+                      borderRadius: '8px',
+                      border: point.isActive ? '1px solid rgba(201,168,76,0.6)' : '1px solid rgba(77,184,158,0.45)',
+                      backgroundColor: 'rgba(9,20,18,0.88)',
+                      color: '#d7ece7',
+                      fontSize: '12px',
+                      boxShadow: '0 6px 16px rgba(0,0,0,0.45)',
+                    }}
+                  >
+                    <strong>{point.country}</strong> • {point.count} prosjekter
+                  </div>
+                </Html>
+              )}
+            </group>
           )
         })}
-      </MapContainer>
+
+        <OrbitControls
+          enablePan={false}
+          enableZoom
+          minDistance={4.2}
+          maxDistance={9}
+          rotateSpeed={0.65}
+          zoomSpeed={0.65}
+          enableDamping
+          dampingFactor={0.08}
+        />
+      </Canvas>
+
+      <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-[var(--csub-light-soft)] bg-[rgba(8,20,17,0.8)] px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+        Hold mouse to rotate globe
+      </div>
     </div>
   )
 }
