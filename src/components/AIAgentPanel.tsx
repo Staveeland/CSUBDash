@@ -89,10 +89,8 @@ export default function AIAgentPanel() {
       followUps: [],
     },
   ])
-  const [savedReports, setSavedReports] = useState<SavedReport[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [historyLoading, setHistoryLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -109,64 +107,22 @@ export default function AIAgentPanel() {
     target.scrollTo({ top: target.scrollHeight, behavior: 'smooth' })
   }, [messages, sending, open])
 
-  const loadReportHistory = useCallback(async () => {
-    setHistoryLoading(true)
-    try {
-      const response = await fetch('/api/agent/reports', { cache: 'no-store' })
-      const payload = await response.json().catch(() => ({})) as { reports?: unknown; error?: unknown }
-
-      if (!response.ok) {
-        throw new Error(typeof payload.error === 'string' ? payload.error : `Report API failed (${response.status})`)
-      }
-
-      const reports = Array.isArray(payload.reports)
-        ? payload.reports
-          .map((entry) => {
-            const row = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null
-            if (!row) return null
-
-            const id = normalizeString(row.id)
-            const title = normalizeString(row.title)
-            const fileName = normalizeString(row.file_name)
-            const createdAt = normalizeString(row.created_at)
-            if (!id || !title || !fileName || !createdAt) return null
-
-            return {
-              id,
-              title,
-              summary: typeof row.summary === 'string' ? row.summary : null,
-              request_text: normalizeString(row.request_text),
-              file_name: fileName,
-              created_at: createdAt,
-              download_url: typeof row.download_url === 'string' ? row.download_url : null,
-            } satisfies SavedReport
-          })
-          .filter((row): row is SavedReport => Boolean(row))
-        : []
-
-      setSavedReports(reports)
-    } catch (loadError) {
-      console.error('Could not load agent report history:', loadError)
-    } finally {
-      setHistoryLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!open) return
-    void loadReportHistory()
-  }, [open, loadReportHistory])
-
-  const sendPrompt = useCallback(async (promptText: string) => {
+  const sendPrompt = useCallback(async (promptText: string, isFollowUp = false) => {
     const content = promptText.trim()
     if (!content || sending) return
 
     setOpen(true)
 
+    // Follow-ups are AI suggestions the user accepted — frame them as such
+    const displayContent = isFollowUp ? content : content
+    const apiContent = isFollowUp
+      ? `Brukeren valgte dette oppfølgingsforslaget fra AI-agenten: "${content}". Gi et fullstendig og detaljert svar.`
+      : content
+
     const userMessage: ChatMessage = {
       id: makeId('user'),
       role: 'user',
-      content,
+      content: displayContent,
       createdAt: isoNow(),
       report: null,
       followUps: [],
@@ -182,7 +138,7 @@ export default function AIAgentPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [...conversationPayload, { role: 'user', content }].slice(-20),
+          messages: [...conversationPayload, { role: 'user', content: apiContent }].slice(-20),
         }),
       })
 
@@ -214,21 +170,6 @@ export default function AIAgentPanel() {
       }
 
       setMessages((current) => [...current, assistantMessage])
-
-      if (report?.downloadUrl) {
-        setSavedReports((current) => [
-          {
-            id: report.id ?? report.fileName,
-            title: report.title,
-            summary: null,
-            request_text: content,
-            file_name: report.fileName,
-            created_at: report.createdAt,
-            download_url: report.downloadUrl,
-          },
-          ...current,
-        ])
-      }
 
       const warnings = normalizeStringArray(payload.dataCoverage?.warnings)
       if (warnings.length > 0) {
@@ -343,7 +284,7 @@ export default function AIAgentPanel() {
                           <button
                             key={`${message.id}-${followUp}`}
                             type="button"
-                            onClick={() => void sendPrompt(followUp)}
+                            onClick={() => void sendPrompt(followUp, true)}
                             className="text-[10px] rounded-md border border-[var(--csub-light-soft)] px-2 py-1 text-[var(--text-muted)] hover:text-white hover:border-[var(--csub-light)] cursor-pointer"
                           >
                             {followUp}
@@ -383,39 +324,6 @@ export default function AIAgentPanel() {
               {error && <p className="text-[11px] text-red-300">{error}</p>}
             </form>
 
-            <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] p-2.5">
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Siste AI-rapporter</p>
-                {historyLoading && <span className="text-[10px] text-[var(--text-muted)]">Laster...</span>}
-              </div>
-
-              {!savedReports.length ? (
-                <p className="text-[11px] text-[var(--text-muted)]">Ingen lagrede AI-rapporter ennå.</p>
-              ) : (
-                <div className="space-y-1.5 max-h-[130px] overflow-y-auto pr-1">
-                  {savedReports.slice(0, 8).map((report) => (
-                    <div key={report.id} className="rounded-md border border-[var(--csub-light-soft)] px-2 py-1.5 bg-[color:rgba(10,23,20,0.45)]">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-[11px] text-white truncate">{report.title}</p>
-                        <span className="text-[10px] text-[var(--text-muted)] shrink-0">{toDateText(report.created_at)}</span>
-                      </div>
-                      {report.download_url ? (
-                        <a
-                          href={report.download_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-block mt-1 text-[11px] text-[var(--csub-light)] hover:text-white"
-                        >
-                          Åpne PDF
-                        </a>
-                      ) : (
-                        <span className="inline-block mt-1 text-[11px] text-[var(--text-muted)]">Link utløpt</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         </section>
       )}
