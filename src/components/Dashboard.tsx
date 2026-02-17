@@ -1504,7 +1504,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     setTimeout(() => setSelectedProject(null), 300)
   }
 
-  const viewLabel = view === 'historical' ? 'Historiske Contract Awards' : 'Kommende Prosjekter'
+  const viewLabel = view === 'historical' ? 'Contract Awards' : 'Kommende Prosjekter'
   const regionalTotal = regionalSummary?.total ?? 0
   const regionalYoyDelta = regionalSummary?.yoyDelta ?? null
   const regionalTopRegion = regionalSummary?.topRegion ?? null
@@ -2355,14 +2355,14 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                   onClick={() => setView('historical')}
                   className={`px-4 py-2 text-sm rounded-md transition-colors cursor-pointer ${view === 'historical' ? 'bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold' : 'text-[var(--text-muted)] hover:text-white'}`}
                 >
-                  Historiske Contract Awards
+                  Contract Awards
                 </button>
                 <button
                   type="button"
                   onClick={() => setView('future')}
                   className={`px-4 py-2 text-sm rounded-md transition-colors cursor-pointer ${view === 'future' ? 'bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold' : 'text-[var(--text-muted)] hover:text-white'}`}
                 >
-                  Future / Kommende Prosjekter
+                  Kommende Prosjekter
                 </button>
               </div>
             </div>
