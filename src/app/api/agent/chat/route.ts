@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAllowedApiUser } from '@/lib/auth/require-user'
-import { runAgentConversation } from '@/lib/ai-agent/service'
+import { runSqlAgent } from '@/lib/ai-agent/sql-agent'
 import type { AgentMessage } from '@/lib/ai-agent/types'
 
 function normalizeMessages(input: unknown): AgentMessage[] {
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing messages[] payload' }, { status: 400 })
     }
 
-    const payload = await runAgentConversation({
+    const payload = await runSqlAgent({
       messages,
       userId: auth.user.id,
       userEmail: auth.user.email ?? 'unknown@csub.com',
