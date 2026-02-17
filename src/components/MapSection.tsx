@@ -1,8 +1,8 @@
 'use client'
 
 import { Canvas } from '@react-three/fiber'
-import { Html, OrbitControls, Stars, useTexture } from '@react-three/drei'
-import { useMemo } from 'react'
+import { Billboard, Html, Line, OrbitControls, Stars, useTexture } from '@react-three/drei'
+import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 
 const COUNTRY_COORDS: Record<string, [number, number]> = {
@@ -46,8 +46,8 @@ interface Props {
 interface GlobePoint {
   country: string
   count: number
-  position: [number, number, number]
-  quaternion: [number, number, number, number]
+  anchorPosition: [number, number, number]
+  markerPosition: [number, number, number]
   flagCode: string
   isActive: boolean
   markerWidthWorld: number
@@ -75,12 +75,6 @@ function latLonToVector3(lat: number, lon: number, radius: number): [number, num
   const z = radius * Math.sin(phi) * Math.sin(theta)
 
   return [x, y, z]
-}
-
-function getSurfaceQuaternion(position: [number, number, number]): [number, number, number, number] {
-  const normal = new THREE.Vector3(position[0], position[1], position[2]).normalize()
-  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
-  return [quaternion.x, quaternion.y, quaternion.z, quaternion.w]
 }
 
 function EarthGlobe() {
@@ -127,9 +121,16 @@ function FlagMarkers({
   points: GlobePoint[]
   onCountrySelect?: (country: string) => void
 }) {
+  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
   const flagCodes = useMemo(() => Array.from(new Set(points.map((point) => point.flagCode))), [points])
   const flagTextureUrls = useMemo(() => flagCodes.map((code) => `https://flagcdn.com/w160/${code}.png`), [flagCodes])
   const loadedTextures = useTexture(flagTextureUrls)
+
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = 'auto'
+    }
+  }, [])
 
   const textureByCode = useMemo(() => {
     const map = new Map<string, THREE.Texture>()
@@ -149,30 +150,87 @@ function FlagMarkers({
       {points.map((point) => {
         const flagTexture = textureByCode.get(point.flagCode)
         if (!flagTexture) return null
+        const isHovered = hoveredCountry === point.country
+        const isRaised = point.isActive || isHovered
+        const buttonWidth = point.markerWidthWorld + 0.038
+        const buttonHeight = point.markerHeightWorld + 0.038
 
         return (
-          <group key={point.country} position={point.position} quaternion={point.quaternion}>
-            {point.isActive && (
-              <mesh position={[0, 0, -0.003]}>
-                <planeGeometry args={[point.markerWidthWorld + 0.03, point.markerHeightWorld + 0.03]} />
-                <meshBasicMaterial color="#c9a84c" transparent opacity={0.75} toneMapped={false} />
-              </mesh>
-            )}
+          <group key={point.country}>
+            <Line
+              points={[point.anchorPosition, point.markerPosition]}
+              color={point.isActive ? '#c9a84c' : '#4db89e'}
+              transparent
+              opacity={point.isActive ? 0.72 : 0.45}
+              lineWidth={1}
+            />
 
-            <mesh
-              position={[0, 0, 0.005]}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation()
-                onCountrySelect?.(point.country)
-              }}
-            >
-              <planeGeometry args={[point.markerWidthWorld, point.markerHeightWorld]} />
-              <meshBasicMaterial map={flagTexture} transparent toneMapped={false} />
-            </mesh>
+            <Billboard follow position={point.markerPosition}>
+              <group scale={isHovered ? 1.08 : 1}>
+                {isRaised && (
+                  <mesh position={[0, 0, -0.012]}>
+                    <planeGeometry args={[buttonWidth + 0.026, buttonHeight + 0.026]} />
+                    <meshBasicMaterial color="#c9a84c" transparent opacity={0.22} depthWrite={false} toneMapped={false} />
+                  </mesh>
+                )}
+
+                <mesh position={[0, -0.012, -0.01]}>
+                  <planeGeometry args={[buttonWidth + 0.03, buttonHeight + 0.03]} />
+                  <meshBasicMaterial color="#020a08" transparent opacity={0.4} depthWrite={false} toneMapped={false} />
+                </mesh>
+
+                <mesh position={[0, 0, -0.004]}>
+                  <planeGeometry args={[buttonWidth, buttonHeight]} />
+                  <meshBasicMaterial
+                    color={isRaised ? '#c9a84c' : '#194539'}
+                    transparent
+                    opacity={isRaised ? 0.94 : 0.84}
+                    toneMapped={false}
+                  />
+                </mesh>
+
+                <mesh position={[0, 0, -0.001]}>
+                  <planeGeometry args={[buttonWidth - 0.016, buttonHeight - 0.016]} />
+                  <meshBasicMaterial color="#081a15" transparent opacity={0.96} toneMapped={false} />
+                </mesh>
+
+                <mesh
+                  position={[0, 0, 0.004]}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onPointerOver={(event) => {
+                    event.stopPropagation()
+                    setHoveredCountry(point.country)
+                    document.body.style.cursor = 'pointer'
+                  }}
+                  onPointerOut={(event) => {
+                    event.stopPropagation()
+                    document.body.style.cursor = 'auto'
+                    setHoveredCountry((prev) => (prev === point.country ? null : prev))
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onCountrySelect?.(point.country)
+                  }}
+                >
+                  <planeGeometry args={[point.markerWidthWorld, point.markerHeightWorld]} />
+                  <meshBasicMaterial map={flagTexture} transparent toneMapped={false} />
+                </mesh>
+              </group>
+            </Billboard>
 
             {point.isActive && (
-              <Html position={[0, point.markerHeightWorld * 0.9, 0.05]} transform sprite occlude={true} distanceFactor={16} zIndexRange={[80, 0]}>
+              <Html
+                position={[
+                  point.markerPosition[0],
+                  point.markerPosition[1] + point.markerHeightWorld * 0.95 + 0.02,
+                  point.markerPosition[2],
+                ]}
+                transform
+                sprite
+                occlude={true}
+                distanceFactor={15}
+                zIndexRange={[80, 0]}
+              >
                 <div
                   style={{
                     pointerEvents: 'none',
@@ -209,17 +267,23 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
       if (!coords || !flagCode) return []
 
       const [lat, lon] = coords
-      const position = latLonToVector3(lat, lon, 2.09)
-      const quaternion = getSurfaceQuaternion(position)
       const intensity = Math.sqrt((entry.count || 0) / maxCount)
-      const markerWidthWorld = 0.16 + intensity * 0.07 + (activeCountryKey === key ? 0.015 : 0)
+      const markerWidthWorld = 0.14 + intensity * 0.055 + (activeCountryKey === key ? 0.01 : 0)
       const markerHeightWorld = markerWidthWorld * 0.66
+      const anchorPosition = latLonToVector3(lat, lon, 2.08)
+      const normal = new THREE.Vector3(anchorPosition[0], anchorPosition[1], anchorPosition[2]).normalize()
+      const markerLift = 0.14 + intensity * 0.08 + (activeCountryKey === key ? 0.03 : 0)
+      const markerPosition: [number, number, number] = [
+        anchorPosition[0] + normal.x * markerLift,
+        anchorPosition[1] + normal.y * markerLift,
+        anchorPosition[2] + normal.z * markerLift,
+      ]
 
       return [{
         country: entry.country,
         count: entry.count,
-        position,
-        quaternion,
+        anchorPosition,
+        markerPosition,
         flagCode,
         isActive: activeCountryKey === key,
         markerWidthWorld,
