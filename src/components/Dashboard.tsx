@@ -43,6 +43,7 @@ interface Charts {
   byPhase: { phase: string; count: number }[]
   byDepth: { depth: string; count: number }[]
   byYear: { year: number; count: number }[]
+  pipelineFlow?: { label: string; value: number }[]
 }
 
 interface Companies {
@@ -1342,16 +1343,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const pipelineData = useMemo(() => buildPipelineByYear(viewProjects), [viewProjects])
 
   const pipelineFlowData = useMemo(() => {
-    const phases = viewCharts.byPhase
-    return PIPELINE_FLOW.map((label, index) => {
-      if (label === 'FEED') return { label, value: viewProjects.length }
-      const query = label.toLowerCase()
-      const value = phases
-        .filter((phase) => normalize(phase.phase).includes(query))
-        .reduce((sum, phase) => sum + phase.count, 0)
-      return { label, value: value || (index === 1 ? Math.round(viewProjects.length * 0.6) : 0) }
-    })
-  }, [viewCharts.byPhase, viewProjects.length])
+    // Use API-provided pipeline flow if available
+    const apiFlow = viewCharts.pipelineFlow
+    if (apiFlow && apiFlow.length > 0) return apiFlow
+    // Fallback
+    return PIPELINE_FLOW.map((label) => ({ label, value: label === 'FEED' ? viewProjects.length : 0 }))
+  }, [viewCharts, viewProjects.length])
 
   const activityFeed = useMemo<ActivityItem[]>(() => {
     const timeline = ['2 timer siden', '5 timer siden', '1 dag siden', '2 dager siden', '3 dager siden']
