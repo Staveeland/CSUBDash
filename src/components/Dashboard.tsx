@@ -866,7 +866,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const userLabel = getUserDisplayName(userEmail)
   const userInitials = getInitials(userLabel)
 
-  const [apiPipelineFlow, setApiPipelineFlow] = useState<{label: string; value: number}[]>([])
+  const [pipelineCounts, setPipelineCounts] = useState<{tender: number; award: number; execution: number; closed: number}>({tender:0,award:0,execution:0,closed:0})
 
   const fetchData = useCallback(async () => {
     try {
@@ -886,7 +886,15 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
       if (chartsRes.ok) {
         const chartsData = await chartsRes.json()
-        if (chartsData.pipelineFlow) setApiPipelineFlow(chartsData.pipelineFlow)
+        if (chartsData.pipelineFlow) {
+          const flow = chartsData.pipelineFlow as {label: string; value: number}[]
+          setPipelineCounts({
+            tender: flow.find(f => f.label === 'Tender')?.value ?? 0,
+            award: flow.find(f => f.label === 'Award')?.value ?? 0,
+            execution: flow.find(f => f.label === 'Execution')?.value ?? 0,
+            closed: flow.find(f => f.label === 'Closed')?.value ?? 0,
+          })
+        }
       }
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
@@ -1353,9 +1361,14 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const pipelineData = useMemo(() => buildPipelineByYear(viewProjects), [viewProjects])
 
   const pipelineFlowData = useMemo(() => {
-    if (apiPipelineFlow.length > 0) return apiPipelineFlow
-    return PIPELINE_FLOW.map((label) => ({ label, value: label === 'FEED' ? viewProjects.length : 0 }))
-  }, [apiPipelineFlow, viewProjects.length])
+    return [
+      { label: 'FEED', value: viewProjects.length },
+      { label: 'Tender', value: pipelineCounts.tender },
+      { label: 'Award', value: pipelineCounts.award },
+      { label: 'Execution', value: pipelineCounts.execution },
+      { label: 'Closed', value: pipelineCounts.closed },
+    ]
+  }, [viewProjects.length, pipelineCounts])
 
   const activityFeed = useMemo<ActivityItem[]>(() => {
     const timeline = ['2 timer siden', '5 timer siden', '1 dag siden', '2 dager siden', '3 dager siden']

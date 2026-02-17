@@ -64,6 +64,9 @@ export async function GET() {
     const xmts = xmtRes.data || []
     const currentYear = new Date().getFullYear()
 
+    // Also fetch contracts for awarded count
+    const contractsCount = contracts.length
+
     // FEED = all projects (everything starts in FEED/study phase)
     const feedCount = projects.length
 
@@ -71,11 +74,11 @@ export async function GET() {
     const tenderProjects = new Set(awards.map(a => a.development_project).filter(Boolean))
     const tenderCount = tenderProjects.size
 
-    // Award = upcoming awards with actual XMTs awarded
-    const awardProjects = new Set(
+    // Award = contracts awarded (from contracts table) + upcoming awards with XMTs
+    const awardedFromAwards = new Set(
       awards.filter(a => (a.xmts_awarded || 0) > 0).map(a => a.development_project).filter(Boolean)
     )
-    const awardCount = awardProjects.size
+    const awardCount = contractsCount > 0 ? contractsCount : awardedFromAwards.size
 
     // Execution = XMT data where contract is awarded and year >= current (active installation)
     const execProjects = new Set(
@@ -84,7 +87,7 @@ export async function GET() {
     )
     const executionCount = execProjects.size
 
-    // Closed = XMT data where last year < current year (completed)
+    // Closed = projects where last year < current year (completed)
     const closedProjects = new Set(
       projects.filter(p => p.last_year && p.last_year < currentYear)
         .map(p => (p as Record<string, unknown>).development_project as string).filter(Boolean)
