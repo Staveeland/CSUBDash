@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAllowedApiUser } from '@/lib/auth/require-user'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 
 function parseYear(value: string | null | undefined): number | null {
   if (!value) return null
@@ -8,34 +9,6 @@ function parseYear(value: string | null | undefined): number | null {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return null
   return parsed.getUTCFullYear()
-}
-
-const PAGE_SIZE = 1000
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchAll(
-  supabase: any,
-  table: string,
-  select: string
-): Promise<{ data: any[]; error: { message: string } | null }> {
-  const allRows: any[] = []
-  let from = 0
-
-  while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(select)
-      .range(from, from + PAGE_SIZE - 1)
-
-    if (error) return { data: allRows, error }
-    if (!data || data.length === 0) break
-
-    allRows.push(...data)
-    if (data.length < PAGE_SIZE) break
-    from += PAGE_SIZE
-  }
-
-  return { data: allRows, error: null }
 }
 
 export async function GET() {

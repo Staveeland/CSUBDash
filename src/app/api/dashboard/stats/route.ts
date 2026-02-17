@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAllowedApiUser } from '@/lib/auth/require-user'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 
 export async function GET() {
   try {
@@ -8,8 +9,8 @@ export async function GET() {
     const supabase = auth.supabase
 
     const [projectsRes, contractsRes] = await Promise.all([
-      supabase.from('projects').select('surf_km, xmt_count, continent').limit(10000),
-      supabase.from('contracts').select('region, created_at, award_date').limit(10000),
+      fetchAll(supabase, 'projects', 'surf_km, xmt_count, continent'),
+      fetchAll(supabase, 'contracts', 'region, created_at, award_date'),
     ])
 
     if (projectsRes.error) throw projectsRes.error
