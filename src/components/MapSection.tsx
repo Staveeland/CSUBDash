@@ -88,7 +88,7 @@ function EarthGlobe() {
   return (
     <group>
       <mesh>
-        <sphereGeometry args={[2.45, 96, 96]} />
+        <sphereGeometry args={[2.2, 96, 96]} />
         <meshStandardMaterial
           map={correctedTexture}
           color="#d9e8e2"
@@ -100,7 +100,7 @@ function EarthGlobe() {
       </mesh>
 
       <mesh>
-        <sphereGeometry args={[2.52, 72, 72]} />
+        <sphereGeometry args={[2.28, 72, 72]} />
         <meshPhongMaterial
           color="#63bfa8"
           transparent
@@ -125,9 +125,9 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
       if (!coords || !flagCode) return []
 
       const [lat, lon] = coords
-      const position = latLonToVector3(lat, lon, 2.58)
+      const position = latLonToVector3(lat, lon, 2.34)
       const intensity = Math.sqrt((entry.count || 0) / maxCount)
-      const markerWidth = Math.round(12 + intensity * 7 + (activeCountryKey === key ? 2 : 0))
+      const markerWidth = Math.round(9 + intensity * 4 + (activeCountryKey === key ? 1 : 0))
       const markerHeight = Math.round(markerWidth * 0.66)
 
       return [{
@@ -144,7 +144,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
 
   return (
     <div className="relative w-full h-[400px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
-      <Canvas camera={{ position: [0, 0, 7], fov: 40 }} dpr={[1, 2]}>
+      <Canvas camera={{ position: [0, 0, 7.8], fov: 40 }} dpr={[1, 2]}>
         <color attach="background" args={['#0a211b']} />
         <ambientLight intensity={1.05} />
         <hemisphereLight args={['#b7e9dd', '#0b1d18', 0.8]} />
@@ -157,7 +157,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
         {points.map((point) => {
           return (
             <group key={point.country} position={point.position}>
-              <Html transform sprite occlude={true} distanceFactor={11} zIndexRange={[60, 0]}>
+              <Html transform sprite occlude={true} distanceFactor={9} zIndexRange={[60, 0]}>
                 <button
                   type="button"
                   onPointerDown={(event) => event.stopPropagation()}
@@ -180,7 +180,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`https://flagcdn.com/w40/${point.flagCode}.png`}
+                    src={`https://flagcdn.com/${point.flagCode}.svg`}
                     alt=""
                     draggable={false}
                     style={{
@@ -188,6 +188,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
                       height: '100%',
                       objectFit: 'cover',
                       display: 'block',
+                      imageRendering: 'auto',
                     }}
                   />
                 </button>
@@ -219,8 +220,8 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
         <OrbitControls
           enablePan={false}
           enableZoom
-          minDistance={4.2}
-          maxDistance={9}
+          minDistance={4.8}
+          maxDistance={10}
           rotateSpeed={0.65}
           zoomSpeed={0.65}
           enableDamping
