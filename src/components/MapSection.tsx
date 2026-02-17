@@ -120,6 +120,83 @@ function EarthGlobe() {
   )
 }
 
+function FlagMarkers({
+  points,
+  onCountrySelect,
+}: {
+  points: GlobePoint[]
+  onCountrySelect?: (country: string) => void
+}) {
+  const flagCodes = useMemo(() => Array.from(new Set(points.map((point) => point.flagCode))), [points])
+  const flagTextureUrls = useMemo(() => flagCodes.map((code) => `https://flagcdn.com/w160/${code}.png`), [flagCodes])
+  const loadedTextures = useTexture(flagTextureUrls)
+
+  const textureByCode = useMemo(() => {
+    const map = new Map<string, THREE.Texture>()
+    flagCodes.forEach((code, index) => {
+      const texture = loadedTextures[index]
+      if (!texture) return
+      const clonedTexture = texture.clone()
+      clonedTexture.colorSpace = THREE.SRGBColorSpace
+      clonedTexture.needsUpdate = true
+      map.set(code, clonedTexture)
+    })
+    return map
+  }, [flagCodes, loadedTextures])
+
+  return (
+    <>
+      {points.map((point) => {
+        const flagTexture = textureByCode.get(point.flagCode)
+        if (!flagTexture) return null
+
+        return (
+          <group key={point.country} position={point.position} quaternion={point.quaternion}>
+            {point.isActive && (
+              <mesh position={[0, 0, -0.003]}>
+                <planeGeometry args={[point.markerWidthWorld + 0.03, point.markerHeightWorld + 0.03]} />
+                <meshBasicMaterial color="#c9a84c" transparent opacity={0.75} toneMapped={false} />
+              </mesh>
+            )}
+
+            <mesh
+              position={[0, 0, 0.005]}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                onCountrySelect?.(point.country)
+              }}
+            >
+              <planeGeometry args={[point.markerWidthWorld, point.markerHeightWorld]} />
+              <meshBasicMaterial map={flagTexture} transparent toneMapped={false} />
+            </mesh>
+
+            {point.isActive && (
+              <Html position={[0, point.markerHeightWorld * 0.9, 0.05]} transform sprite occlude={true} distanceFactor={16} zIndexRange={[80, 0]}>
+                <div
+                  style={{
+                    pointerEvents: 'none',
+                    whiteSpace: 'nowrap',
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(201,168,76,0.5)',
+                    backgroundColor: 'rgba(9,20,18,0.82)',
+                    color: '#d7ece7',
+                    fontSize: '10px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  <strong>{point.country}</strong> • {point.count} prosjekter
+                </div>
+              </Html>
+            )}
+          </group>
+        )
+      })}
+    </>
+  )
+}
+
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
   const activeCountryKey = normalizeCountryName(activeCountry ?? '')
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
@@ -151,21 +228,6 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
     })
   }, [activeCountryKey, countryData, maxCount])
 
-  const flagCodes = useMemo(() => Array.from(new Set(points.map((point) => point.flagCode))), [points])
-  const flagTextures = useTexture(flagCodes.map((code) => `https://flagcdn.com/w160/${code}.png`))
-  const textureByCode = useMemo(() => {
-    const map = new Map<string, THREE.Texture>()
-    flagCodes.forEach((code, index) => {
-      const texture = flagTextures[index]
-      if (!texture) return
-      const clonedTexture = texture.clone()
-      clonedTexture.colorSpace = THREE.SRGBColorSpace
-      clonedTexture.needsUpdate = true
-      map.set(code, clonedTexture)
-    })
-    return map
-  }, [flagCodes, flagTextures])
-
   return (
     <div className="relative w-full h-[400px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
       <Canvas camera={{ position: [0, 0, 8.3], fov: 40 }} dpr={[1, 2]}>
@@ -177,54 +239,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
 
         <Stars radius={70} depth={30} count={1100} factor={2} saturation={0} fade speed={0.25} />
         <EarthGlobe />
-
-        {points.map((point) => {
-          const flagTexture = textureByCode.get(point.flagCode)
-          if (!flagTexture) return null
-
-          return (
-            <group key={point.country} position={point.position} quaternion={point.quaternion}>
-              {point.isActive && (
-                <mesh position={[0, 0, -0.003]}>
-                  <planeGeometry args={[point.markerWidthWorld + 0.03, point.markerHeightWorld + 0.03]} />
-                  <meshBasicMaterial color="#c9a84c" transparent opacity={0.75} toneMapped={false} />
-                </mesh>
-              )}
-
-              <mesh
-                position={[0, 0, 0.005]}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onCountrySelect?.(point.country)
-                }}
-              >
-                <planeGeometry args={[point.markerWidthWorld, point.markerHeightWorld]} />
-                <meshBasicMaterial map={flagTexture} transparent toneMapped={false} />
-              </mesh>
-
-              {point.isActive && (
-                <Html position={[0, point.markerHeightWorld * 0.9, 0.05]} transform sprite occlude={true} distanceFactor={16} zIndexRange={[80, 0]}>
-                  <div
-                    style={{
-                      pointerEvents: 'none',
-                      whiteSpace: 'nowrap',
-                      padding: '4px 8px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(201,168,76,0.5)',
-                      backgroundColor: 'rgba(9,20,18,0.82)',
-                      color: '#d7ece7',
-                      fontSize: '10px',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-                    }}
-                  >
-                    <strong>{point.country}</strong> • {point.count} prosjekter
-                  </div>
-                </Html>
-              )}
-            </group>
-          )
-        })}
+        <FlagMarkers points={points} onCountrySelect={onCountrySelect} />
 
         <OrbitControls
           enablePan={false}
