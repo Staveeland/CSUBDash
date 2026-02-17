@@ -1,8 +1,8 @@
 'use client'
 
 import { Canvas } from '@react-three/fiber'
-import { Html, OrbitControls, Sphere, Stars, useTexture } from '@react-three/drei'
-import { useMemo, useState } from 'react'
+import { Html, OrbitControls, Stars, useTexture } from '@react-three/drei'
+import { useMemo, useRef, useState, type RefObject } from 'react'
 import * as THREE from 'three'
 
 const COUNTRY_COORDS: Record<string, [number, number]> = {
@@ -47,9 +47,10 @@ interface GlobePoint {
   country: string
   count: number
   position: [number, number, number]
-  flagEmoji: string
+  flagCode: string
   isActive: boolean
-  markerSize: number
+  markerWidth: number
+  markerHeight: number
 }
 
 function normalizeCountryName(value: string): string {
@@ -75,45 +76,46 @@ function latLonToVector3(lat: number, lon: number, radius: number): [number, num
   return [x, y, z]
 }
 
-function countryCodeToEmoji(countryCode: string): string {
-  return countryCode
-    .toUpperCase()
-    .slice(0, 2)
-    .split('')
-    .map((char) => String.fromCodePoint(127397 + char.charCodeAt(0)))
-    .join('')
-}
-
-function EarthGlobe() {
+function EarthGlobe({ surfaceRef }: { surfaceRef: RefObject<THREE.Mesh | null> }) {
   const earthTexture = useTexture('/textures/earth_atmos_2048.jpg')
+  const correctedTexture = useMemo(() => {
+    const clonedTexture = earthTexture.clone()
+    clonedTexture.colorSpace = THREE.SRGBColorSpace
+    clonedTexture.needsUpdate = true
+    return clonedTexture
+  }, [earthTexture])
 
   return (
     <group>
-      <Sphere args={[2.45, 96, 96]}>
+      <mesh ref={surfaceRef}>
+        <sphereGeometry args={[2.45, 96, 96]} />
         <meshStandardMaterial
-          map={earthTexture}
-          roughness={0.82}
-          metalness={0.1}
-          emissive="#0a1b16"
-          emissiveIntensity={0.08}
+          map={correctedTexture}
+          color="#d9e8e2"
+          roughness={0.92}
+          metalness={0.02}
+          emissive="#123229"
+          emissiveIntensity={0.2}
         />
-      </Sphere>
+      </mesh>
 
-      <Sphere args={[2.52, 72, 72]}>
+      <mesh>
+        <sphereGeometry args={[2.52, 72, 72]} />
         <meshPhongMaterial
           color="#63bfa8"
           transparent
-          opacity={0.11}
+          opacity={0.09}
           side={THREE.BackSide}
           depthWrite={false}
         />
-      </Sphere>
+      </mesh>
     </group>
   )
 }
 
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
+  const globeSurfaceRef = useRef<THREE.Mesh | null>(null)
   const activeCountryKey = normalizeCountryName(activeCountry ?? '')
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
 
@@ -125,17 +127,19 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
       if (!coords || !flagCode) return []
 
       const [lat, lon] = coords
-      const position = latLonToVector3(lat, lon, 2.62)
+      const position = latLonToVector3(lat, lon, 2.58)
       const intensity = Math.sqrt((entry.count || 0) / maxCount)
-      const markerSize = 26 + intensity * 16
+      const markerWidth = Math.round(12 + intensity * 7 + (activeCountryKey === key ? 2 : 0))
+      const markerHeight = Math.round(markerWidth * 0.66)
 
       return [{
         country: entry.country,
         count: entry.count,
         position,
-        flagEmoji: countryCodeToEmoji(flagCode),
+        flagCode,
         isActive: activeCountryKey === key,
-        markerSize,
+        markerWidth,
+        markerHeight,
       }]
     })
   }, [activeCountryKey, countryData, maxCount])
@@ -143,59 +147,69 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
   return (
     <div className="relative w-full h-[400px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
       <Canvas camera={{ position: [0, 0, 7], fov: 40 }} dpr={[1, 2]}>
-        <color attach="background" args={['#071610']} />
-        <fog attach="fog" args={['#071610', 6.5, 12]} />
-        <ambientLight intensity={0.75} />
-        <directionalLight position={[7, 5, 4]} intensity={1.15} color="#9fdccf" />
-        <directionalLight position={[-6, -4, -5]} intensity={0.35} color="#4db89e" />
+        <color attach="background" args={['#0a211b']} />
+        <ambientLight intensity={1.05} />
+        <hemisphereLight args={['#b7e9dd', '#0b1d18', 0.8]} />
+        <directionalLight position={[7, 5, 4]} intensity={1.4} color="#b9ece0" />
+        <directionalLight position={[-6, -4, -5]} intensity={0.55} color="#4db89e" />
 
-        <Stars radius={70} depth={30} count={1500} factor={2.2} saturation={0} fade speed={0.3} />
-        <EarthGlobe />
+        <Stars radius={70} depth={30} count={1100} factor={2} saturation={0} fade speed={0.25} />
+        <EarthGlobe surfaceRef={globeSurfaceRef} />
 
         {points.map((point) => {
           const isHovered = hoveredCountry === point.country
           const borderColor = point.isActive ? '#c9a84c' : '#4db89e'
-          const scale = isHovered || point.isActive ? 1.18 : 1
 
           return (
             <group key={point.country} position={point.position}>
-              <Html transform sprite distanceFactor={14} zIndexRange={[120, 0]}>
+              <Html transform sprite occlude={[globeSurfaceRef]} distanceFactor={11} zIndexRange={[60, 0]}>
                 <button
                   type="button"
-                  onMouseEnter={() => setHoveredCountry(point.country)}
-                  onMouseLeave={() => setHoveredCountry((current) => current === point.country ? null : current)}
+                  onPointerEnter={(event) => {
+                    event.stopPropagation()
+                    setHoveredCountry(point.country)
+                  }}
+                  onPointerLeave={(event) => {
+                    event.stopPropagation()
+                    setHoveredCountry((current) => current === point.country ? null : current)
+                  }}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation()
                     onCountrySelect?.(point.country)
                   }}
                   style={{
-                    width: `${point.markerSize}px`,
-                    height: `${Math.round(point.markerSize * 0.78)}px`,
-                    transform: `scale(${scale})`,
-                    transformOrigin: 'center',
-                    border: `2px solid ${borderColor}`,
-                    borderRadius: '4px',
+                    width: `${point.markerWidth}px`,
+                    height: `${point.markerHeight}px`,
+                    border: `1.5px solid ${borderColor}`,
+                    borderRadius: '3px',
                     backgroundColor: '#10231d',
-                    display: 'grid',
-                    placeItems: 'center',
+                    overflow: 'hidden',
                     cursor: 'pointer',
                     boxShadow: point.isActive
-                      ? '0 0 0 2px rgba(201,168,76,0.35), 0 4px 14px rgba(0,0,0,0.45)'
-                      : '0 3px 10px rgba(0,0,0,0.4)',
-                    transition: 'transform 120ms ease, border-color 120ms ease',
-                    fontSize: `${Math.round(point.markerSize * 0.62)}px`,
-                    lineHeight: 1,
+                      ? '0 0 0 1px rgba(201,168,76,0.35), 0 3px 9px rgba(0,0,0,0.4)'
+                      : '0 2px 7px rgba(0,0,0,0.35)',
                   }}
                   aria-label={`${point.country} (${point.count} prosjekter)`}
                   title={`${point.country}: ${point.count} prosjekter`}
                 >
-                  <span>{point.flagEmoji}</span>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`https://flagcdn.com/w40/${point.flagCode}.png`}
+                    alt=""
+                    draggable={false}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      display: 'block',
+                    }}
+                  />
                 </button>
               </Html>
 
               {(isHovered || point.isActive) && (
-                <Html position={[0, 0.27, 0]} transform sprite distanceFactor={16} zIndexRange={[140, 0]}>
+                <Html position={[0, 0.24, 0]} transform sprite occlude={[globeSurfaceRef]} distanceFactor={16} zIndexRange={[80, 0]}>
                   <div
                     style={{
                       pointerEvents: 'none',
