@@ -122,10 +122,10 @@ async function upsertChunked(
   let imported = 0
   let skipped = 0
   const conflictColumns = onConflict.split(',').map((c) => c.trim())
+  const deduplicatedRows = deduplicateByConflictKey(rows, conflictColumns)
 
-  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-    const rawChunk = rows.slice(i, i + CHUNK_SIZE)
-    const chunk = deduplicateByConflictKey(rawChunk, conflictColumns)
+  for (let i = 0; i < deduplicatedRows.length; i += CHUNK_SIZE) {
+    const chunk = deduplicatedRows.slice(i, i + CHUNK_SIZE)
     const { data, error } = await supabase
       .from(table)
       .upsert(chunk, { onConflict, ignoreDuplicates: false })
