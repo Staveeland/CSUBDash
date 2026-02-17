@@ -2,7 +2,7 @@
 
 import { Canvas } from '@react-three/fiber'
 import { Html, OrbitControls, Stars, useTexture } from '@react-three/drei'
-import { useMemo, useRef, useState, type RefObject } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import * as THREE from 'three'
 
 const COUNTRY_COORDS: Record<string, [number, number]> = {
@@ -76,7 +76,7 @@ function latLonToVector3(lat: number, lon: number, radius: number): [number, num
   return [x, y, z]
 }
 
-function EarthGlobe({ surfaceRef }: { surfaceRef: RefObject<THREE.Mesh> }) {
+function EarthGlobe({ onSurfaceChange }: { onSurfaceChange: (mesh: THREE.Mesh | null) => void }) {
   const earthTexture = useTexture('/textures/earth_atmos_2048.jpg')
   const correctedTexture = useMemo(() => {
     const clonedTexture = earthTexture.clone()
@@ -87,7 +87,7 @@ function EarthGlobe({ surfaceRef }: { surfaceRef: RefObject<THREE.Mesh> }) {
 
   return (
     <group>
-      <mesh ref={surfaceRef}>
+      <mesh ref={onSurfaceChange}>
         <sphereGeometry args={[2.45, 96, 96]} />
         <meshStandardMaterial
           map={correctedTexture}
@@ -115,9 +115,13 @@ function EarthGlobe({ surfaceRef }: { surfaceRef: RefObject<THREE.Mesh> }) {
 
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
-  const globeSurfaceRef = useRef<THREE.Mesh>(null)
+  const [globeSurface, setGlobeSurface] = useState<THREE.Mesh | null>(null)
   const activeCountryKey = normalizeCountryName(activeCountry ?? '')
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
+  const occluders = useMemo(() => (globeSurface ? [globeSurface] : false), [globeSurface])
+  const handleSurfaceChange = useCallback((mesh: THREE.Mesh | null) => {
+    setGlobeSurface((current) => (current === mesh ? current : mesh))
+  }, [])
 
   const points = useMemo<GlobePoint[]>(() => {
     return countryData.flatMap((entry) => {
@@ -154,7 +158,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
         <directionalLight position={[-6, -4, -5]} intensity={0.55} color="#4db89e" />
 
         <Stars radius={70} depth={30} count={1100} factor={2} saturation={0} fade speed={0.25} />
-        <EarthGlobe surfaceRef={globeSurfaceRef} />
+        <EarthGlobe onSurfaceChange={handleSurfaceChange} />
 
         {points.map((point) => {
           const isHovered = hoveredCountry === point.country
@@ -162,7 +166,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
 
           return (
             <group key={point.country} position={point.position}>
-              <Html transform sprite occlude={[globeSurfaceRef]} distanceFactor={11} zIndexRange={[60, 0]}>
+              <Html transform sprite occlude={occluders} distanceFactor={11} zIndexRange={[60, 0]}>
                 <button
                   type="button"
                   onPointerEnter={(event) => {
@@ -209,7 +213,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
               </Html>
 
               {(isHovered || point.isActive) && (
-                <Html position={[0, 0.24, 0]} transform sprite occlude={[globeSurfaceRef]} distanceFactor={16} zIndexRange={[80, 0]}>
+                <Html position={[0, 0.24, 0]} transform sprite occlude={occluders} distanceFactor={16} zIndexRange={[80, 0]}>
                   <div
                     style={{
                       pointerEvents: 'none',
