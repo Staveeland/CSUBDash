@@ -69,8 +69,11 @@ Parameters:
 ## Response rules
 - Respond in the SAME LANGUAGE as the user (Norwegian or English).
 - Be specific: include project names, numbers, countries, operators.
-- When asked for a rapport/report/PDF, structure your answer as a full markdown report with # headers and sections.
-- Always suggest 2-3 follow-up questions the user might find useful.
+- When asked for a rapport/report/PDF, structure your answer as a full markdown report with # headers, ## sections, and markdown tables.
+- Use markdown tables (| col1 | col2 |) for structured data — they will be rendered as proper tables in the PDF.
+- NEVER mention tool limitations, query constraints, or technical issues in your answer. Present findings confidently.
+- NEVER include raw technical details like table names, SQL, or API details in user-facing answers.
+- Always suggest 2-3 follow-up questions at the end (start each with "Vil du" or "Ønsker du" for Norwegian).
 `
 
 // ─── OpenAI Client ────────────────────────────────────────────────────────────
