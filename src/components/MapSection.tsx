@@ -1,6 +1,7 @@
 'use client'
 
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
+import { DivIcon } from 'leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Tooltip } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 
 const COUNTRY_COORDS: Record<string, [number, number]> = {
@@ -19,6 +20,58 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
   'Romania':[45.9,24.9],'Russia':[61,105],
 }
 
+const COUNTRY_FLAGS: Record<string, string> = {
+  'Australia':'au','Angola':'ao','Brazil':'br','Brasil':'br',
+  'Norway':'no','Norge':'no','UK':'gb','USA':'us','Qatar':'qa',
+  'Saudi Arabia':'sa','UAE':'ae','Nigeria':'ng','Ghana':'gh',
+  'Mozambique':'mz','Egypt':'eg','India':'in','Malaysia':'my',
+  'Indonesia':'id','Mexico':'mx','Trinidad':'tt',
+  'Guyana':'gy','Canada':'ca','Italy':'it','Turkey':'tr',
+  'Oman':'om','Kuwait':'kw','Azerbaijan':'az',
+  'Senegal':'sn','Ivory Coast':'ci','Suriname':'sr',
+  'Argentina':'ar','China':'cn','Thailand':'th',
+  'Vietnam':'vn','Philippines':'ph','Myanmar':'mm',
+  'United States':'us','United States of America':'us','United Kingdom':'gb','Great Britain':'gb','United Arab Emirates':'ae',
+  'Congo':'cg','Gabon':'ga','Ireland':'ie','Namibia':'na',
+  'Romania':'ro','Russia':'ru',
+}
+
+function normalizeCountryName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+const COUNTRY_COORDS_BY_KEY = new Map<string, [number, number]>(
+  Object.entries(COUNTRY_COORDS).map(([country, coords]) => [normalizeCountryName(country), coords]),
+)
+
+const COUNTRY_FLAGS_BY_KEY = new Map<string, string>(
+  Object.entries(COUNTRY_FLAGS).map(([country, flagCode]) => [normalizeCountryName(country), flagCode]),
+)
+
+const FLAG_ICON_CACHE = new Map<string, DivIcon>()
+
+function createFlagIcon(flagCode: string, flagHeight: number, isActive: boolean): DivIcon {
+  const width = Math.round(flagHeight * 1.35)
+  const activeStyle = isActive
+    ? 'border-color:#c9a84c;box-shadow:0 0 0 2px rgba(201,168,76,0.5),0 4px 10px rgba(0,0,0,0.45);'
+    : 'border-color:#4db89e;box-shadow:0 2px 8px rgba(0,0,0,0.35);'
+  const cacheKey = `${flagCode}-${width}-${flagHeight}-${isActive ? 'active' : 'default'}`
+  const cached = FLAG_ICON_CACHE.get(cacheKey)
+  if (cached) return cached
+
+  const icon = new DivIcon({
+    className: 'country-flag-icon',
+    iconSize: [width, flagHeight],
+    iconAnchor: [Math.round(width / 2), Math.round(flagHeight / 2)],
+    popupAnchor: [0, -Math.round(flagHeight / 2)],
+    tooltipAnchor: [0, -Math.round(flagHeight / 2)],
+    html: `<span style="display:block;width:${width}px;height:${flagHeight}px;border:2px solid;border-radius:4px;overflow:hidden;background:#10231d;${activeStyle}"><img src="https://flagcdn.com/w80/${flagCode}.png" alt="" style="display:block;width:100%;height:100%;object-fit:cover;" loading="lazy" /></span>`,
+  })
+
+  FLAG_ICON_CACHE.set(cacheKey, icon)
+  return icon
+}
+
 interface Props {
   countryData: { country: string; count: number }[]
   onCountrySelect?: (country: string) => void
@@ -27,6 +80,7 @@ interface Props {
 
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
+  const activeCountryKey = normalizeCountryName(activeCountry ?? '')
 
   return (
     <div className="relative w-full h-[400px] rounded-xl overflow-hidden z-0 border border-[var(--csub-light-soft)] shadow-lg">
@@ -42,28 +96,29 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
           subdomains="abcd"
         />
         {countryData.map((entry) => {
-          const coords = COUNTRY_COORDS[entry.country]
-          if (!coords) return null
-          const isActive = (activeCountry ?? '').trim().toLowerCase() === entry.country.trim().toLowerCase()
-          const radius = Math.max(6, Math.sqrt(entry.count / maxCount) * 30) + (isActive ? 2 : 0)
+          const countryKey = normalizeCountryName(entry.country)
+          const coords = COUNTRY_COORDS_BY_KEY.get(countryKey)
+          const flagCode = COUNTRY_FLAGS_BY_KEY.get(countryKey)
+          if (!coords || !flagCode) return null
+
+          const isActive = activeCountryKey === countryKey
+          const intensity = Math.sqrt((entry.count || 0) / maxCount)
+          const flagHeight = Math.min(40, Math.max(18, Math.round(18 + intensity * 16 + (isActive ? 4 : 0))))
+
           return (
-            <CircleMarker
+            <Marker
               key={entry.country}
               center={coords}
-              radius={radius}
+              icon={createFlagIcon(flagCode, flagHeight, isActive)}
               eventHandlers={{
                 click: () => {
                   onCountrySelect?.(entry.country)
                 },
               }}
-              pathOptions={{
-                fillColor: isActive ? '#c9a84c' : '#4db89e',
-                color: isActive ? '#3d3212' : '#0e2620',
-                weight: 1.5,
-                opacity: 0.9,
-                fillOpacity: isActive ? 0.85 : 0.6,
-              }}
             >
+              <Tooltip direction="top" offset={[0, -Math.round(flagHeight * 0.65)]}>
+                {entry.country}
+              </Tooltip>
               <Popup>
                 <strong>{entry.country}</strong>
                 <br />
@@ -75,7 +130,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
                   </>
                 )}
               </Popup>
-            </CircleMarker>
+            </Marker>
           )
         })}
       </MapContainer>
