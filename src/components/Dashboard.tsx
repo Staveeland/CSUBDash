@@ -882,6 +882,11 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const userInitials = getInitials(userLabel)
 
   const [pipelineCounts, setPipelineCounts] = useState<{tender: number; award: number; execution: number; closed: number}>({tender:0,award:0,execution:0,closed:0})
+  const [projectYearTotals, setProjectYearTotals] = useState<{
+    xmt: Record<number, number>
+    surf: Record<number, number>
+    pipeline: Record<number, number>
+  }>({ xmt: {}, surf: {}, pipeline: {} })
 
   const fetchData = useCallback(async () => {
     try {
@@ -910,6 +915,25 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             closed: flow.find(f => f.label === 'Closed')?.value ?? 0,
           })
         }
+
+        const toYearValueMap = (rows: unknown): Record<number, number> => {
+          const map: Record<number, number> = {}
+          if (!Array.isArray(rows)) return map
+          rows.forEach((entry) => {
+            const row = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {}
+            const year = Number(row.year)
+            const value = Number(row.value)
+            if (!Number.isFinite(year) || !Number.isFinite(value)) return
+            map[year] = value
+          })
+          return map
+        }
+
+        setProjectYearTotals({
+          xmt: toYearValueMap(chartsData.xmtByYearProjectData),
+          surf: toYearValueMap(chartsData.surfByYearProjectData),
+          pipeline: toYearValueMap(chartsData.pipelineValueByYear),
+        })
       }
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
@@ -1381,7 +1405,20 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     }
   }, [viewProjects, view, currentYear])
 
-  const pipelineData = useMemo(() => buildPipelineByYear(viewProjects), [viewProjects])
+  const pipelineData = useMemo(() => {
+    if (view === 'future' && region === 'All') {
+      const fromRawTables = Object.entries(projectYearTotals.pipeline)
+        .map(([year, value]) => ({ period: year, value }))
+        .filter((entry) => Number.isFinite(Number(entry.period)) && Number.isFinite(entry.value))
+        .sort((a, b) => Number(a.period) - Number(b.period))
+
+      if (fromRawTables.length > 0) {
+        return fromRawTables
+      }
+    }
+
+    return buildPipelineByYear(viewProjects)
+  }, [projectYearTotals.pipeline, region, view, viewProjects])
 
   const pipelineFlowData = useMemo(() => {
     return [
@@ -1726,12 +1763,29 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       .sort((a, b) => estimateProjectValue(b) - estimateProjectValue(a))
       .slice(0, 10)
 
-    buildProjectInsight({
+    const coveragePct = viewProjects.length > 0 ? (selectedProjects.length / viewProjects.length) * 100 : 0
+    const rawXmtForYear = projectYearTotals.xmt[year]
+    const rawSurfForYear = projectYearTotals.surf[year]
+    const xmtForYear = Number.isFinite(rawXmtForYear)
+      ? rawXmtForYear
+      : selectedProjects.reduce((sum, project) => sum + (project.xmt_count || 0), 0)
+    const surfForYear = Number.isFinite(rawSurfForYear)
+      ? rawSurfForYear
+      : selectedProjects.reduce((sum, project) => sum + (project.surf_km || 0), 0)
+
+    openInsightPanel({
       id: `pipeline-year-${year}`,
       title: `Pipelineverdi ${year}`,
       subtitle: pipelinePoint ? formatMillions(pipelinePoint.value) : `${selectedProjects.length} prosjekter`,
       description: 'Klikk prosjekt i listen for full kontraktdetalj.',
-      selectedProjects,
+      source: 'projects',
+      metrics: [
+        { label: 'Treff', value: selectedProjects.length.toLocaleString('en-US') },
+        { label: 'Andel av view', value: `${coveragePct.toFixed(1)}%` },
+        { label: 'SURF km', value: `${Math.round(surfForYear).toLocaleString('en-US')} km` },
+        { label: 'XMTs', value: Math.round(xmtForYear).toLocaleString('en-US') },
+        ...(pipelinePoint ? [{ label: 'Estimert verdi', value: formatMillions(pipelinePoint.value) }] : []),
+      ],
       chartTitle: 'Faser i valgt år',
       chartFormat: 'count',
       chartData: phaseBreakdown.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
@@ -1741,9 +1795,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         value: formatMillions(estimateProjectValue(project)),
         detail: `${project.country || 'Ukjent land'} • ${project.operator || project.surf_contractor || 'Ukjent aktør'}`,
       })),
-      extraMetrics: pipelinePoint
-        ? [{ label: 'Estimert verdi', value: formatMillions(pipelinePoint.value) }]
-        : [],
+      projects: selectedProjects,
     })
   }
 
@@ -1901,12 +1953,27 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const openYearInsight = (year: number) => {
     const selectedProjects = getProjectsByYear(year)
     const selectedCharts = buildChartsFromProjects(selectedProjects)
+    const coveragePct = viewProjects.length > 0 ? (selectedProjects.length / viewProjects.length) * 100 : 0
+    const rawXmtForYear = projectYearTotals.xmt[year]
+    const rawSurfForYear = projectYearTotals.surf[year]
+    const xmtForYear = Number.isFinite(rawXmtForYear)
+      ? rawXmtForYear
+      : selectedProjects.reduce((sum, project) => sum + (project.xmt_count || 0), 0)
+    const surfForYear = Number.isFinite(rawSurfForYear)
+      ? rawSurfForYear
+      : selectedProjects.reduce((sum, project) => sum + (project.surf_km || 0), 0)
 
-    buildProjectInsight({
+    openInsightPanel({
       id: `year-${year}`,
       title: `${year}: ${view === 'historical' ? 'Awards' : 'Prosjekter'}`,
       subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
-      selectedProjects,
+      source: 'projects',
+      metrics: [
+        { label: 'Treff', value: selectedProjects.length.toLocaleString('en-US') },
+        { label: 'Andel av view', value: `${coveragePct.toFixed(1)}%` },
+        { label: 'SURF km', value: `${Math.round(surfForYear).toLocaleString('en-US')} km` },
+        { label: 'XMTs', value: Math.round(xmtForYear).toLocaleString('en-US') },
+      ],
       chartTitle: 'Fasefordeling',
       chartFormat: 'count',
       chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
@@ -1915,6 +1982,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         label: item.country,
         value: item.count.toLocaleString('en-US'),
       })),
+      projects: selectedProjects,
     })
   }
 

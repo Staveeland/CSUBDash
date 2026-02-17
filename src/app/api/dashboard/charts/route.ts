@@ -8,15 +8,18 @@ export async function GET() {
     if (!auth.ok) return auth.response
     const supabase = auth.supabase
 
-    const [projectsRes, contractsRes, awardsRes, xmtRes] = await Promise.all([
+    const [projectsRes, contractsRes, awardsRes, xmtRes, surfRes] = await Promise.all([
       fetchAll(supabase, 'projects', 'country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category, development_project'),
       fetchAll(supabase, 'contracts', 'region, country, contract_type, award_date'),
       fetchAll(supabase, 'upcoming_awards', 'development_project, xmts_awarded, year'),
-      fetchAll(supabase, 'xmt_data', 'development_project, contract_award_year, xmt_count, state'),
+      fetchAll(supabase, 'xmt_data', 'development_project, contract_award_year, xmt_count, state, year'),
+      fetchAll(supabase, 'surf_data', 'year, km_surf_lines'),
     ])
 
     if (projectsRes.error) throw projectsRes.error
     if (contractsRes.error) throw contractsRes.error
+    if (xmtRes.error) throw xmtRes.error
+    if (surfRes.error) throw surfRes.error
 
     const projects = projectsRes.data || []
     const contracts = contractsRes.data || []
@@ -62,6 +65,7 @@ export async function GET() {
     // Pipeline flow (FEED → Tender → Award → Execution → Closed)
     const awards = awardsRes.data || []
     const xmts = xmtRes.data || []
+    const surfs = surfRes.data || []
     const currentYear = new Date().getFullYear()
 
     // Also fetch contracts for awarded count
@@ -102,7 +106,54 @@ export async function GET() {
       { label: 'Closed', value: closedCount },
     ]
 
-    return NextResponse.json({ byCountry, byPhase, byDepth, byYear, pipelineFlow })
+    const xmtByYearMap = new Map<number, number>()
+    xmts.forEach((row) => {
+      const year = Number(row.year)
+      if (!Number.isFinite(year)) return
+      xmtByYearMap.set(year, (xmtByYearMap.get(year) ?? 0) + Number(row.xmt_count || 0))
+    })
+
+    const surfByYearMap = new Map<number, number>()
+    surfs.forEach((row) => {
+      const year = Number(row.year)
+      if (!Number.isFinite(year)) return
+      surfByYearMap.set(year, (surfByYearMap.get(year) ?? 0) + Number(row.km_surf_lines || 0))
+    })
+
+    const allYears = new Set<number>([
+      ...xmtByYearMap.keys(),
+      ...surfByYearMap.keys(),
+    ])
+
+    const xmtByYearProjectData = Array.from(xmtByYearMap.entries())
+      .map(([year, value]) => ({ year, value }))
+      .sort((a, b) => a.year - b.year)
+
+    const surfByYearProjectData = Array.from(surfByYearMap.entries())
+      .map(([year, value]) => ({ year, value }))
+      .sort((a, b) => a.year - b.year)
+
+    const pipelineValueByYear = Array.from(allYears.values())
+      .map((year) => {
+        const xmtValue = xmtByYearMap.get(year) ?? 0
+        const surfValue = surfByYearMap.get(year) ?? 0
+        return {
+          year,
+          value: surfValue * 1_000_000 + xmtValue * 120_000,
+        }
+      })
+      .sort((a, b) => a.year - b.year)
+
+    return NextResponse.json({
+      byCountry,
+      byPhase,
+      byDepth,
+      byYear,
+      pipelineFlow,
+      xmtByYearProjectData,
+      surfByYearProjectData,
+      pipelineValueByYear,
+    })
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 })
   }
