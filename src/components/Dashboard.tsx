@@ -861,7 +861,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [highlightedProjectKey, setHighlightedProjectKey] = useState<string | null>(null)
   const [lang, setLang] = useState<'no' | 'en'>('no')
-  const [region, setRegion] = useState<RegionFilter>('All')
+  const region: RegionFilter = 'All'
   const [view, setView] = useState<DashboardView>('historical')
   const [tableSort, setTableSort] = useState<TableSortConfig | null>(null)
   const [showAllTableRows, setShowAllTableRows] = useState(false)
@@ -2367,20 +2367,9 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h3 className="text-base text-white">{viewLabel}</h3>
-                <p className="text-xs text-[var(--text-muted)]">Regionfilter gjelder alltid for valgt view</p>
-              </div>
-              <select
-                value={region}
-                onChange={(event) => setRegion(event.target.value as RegionFilter)}
-                className="bg-[var(--bg-dark)] border border-[var(--csub-light-soft)] text-white text-sm rounded-lg px-4 py-2 font-sans focus:ring-2 focus:ring-[var(--csub-gold)] focus:outline-none w-full sm:w-auto cursor-pointer"
-              >
-                <option value="All">Globalt (Alle prosjekter)</option>
-                <option value="NorthSea">Nordsjoen</option>
-                <option value="GoM">Gulf of Mexico</option>
-              </select>
+            <div>
+              <h3 className="text-base text-white">{viewLabel}</h3>
+              <p className="text-xs text-[var(--text-muted)]">Viser globale data</p>
             </div>
           </div>
         </section>
