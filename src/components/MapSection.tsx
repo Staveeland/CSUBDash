@@ -2,7 +2,7 @@
 
 import { Canvas } from '@react-three/fiber'
 import { Html, OrbitControls, Stars, useTexture } from '@react-three/drei'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import * as THREE from 'three'
 
 const COUNTRY_COORDS: Record<string, [number, number]> = {
@@ -114,7 +114,6 @@ function EarthGlobe() {
 }
 
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
-  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
   const activeCountryKey = normalizeCountryName(activeCountry ?? '')
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
 
@@ -156,22 +155,11 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
         <EarthGlobe />
 
         {points.map((point) => {
-          const isHovered = hoveredCountry === point.country
-          const borderColor = point.isActive ? '#c9a84c' : '#4db89e'
-
           return (
             <group key={point.country} position={point.position}>
               <Html transform sprite occlude={true} distanceFactor={11} zIndexRange={[60, 0]}>
                 <button
                   type="button"
-                  onPointerEnter={(event) => {
-                    event.stopPropagation()
-                    setHoveredCountry(point.country)
-                  }}
-                  onPointerLeave={(event) => {
-                    event.stopPropagation()
-                    setHoveredCountry((current) => current === point.country ? null : current)
-                  }}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation()
@@ -180,13 +168,11 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
                   style={{
                     width: `${point.markerWidth}px`,
                     height: `${point.markerHeight}px`,
-                    border: `1.5px solid ${borderColor}`,
                     borderRadius: '3px',
-                    backgroundColor: '#10231d',
                     overflow: 'hidden',
                     cursor: 'pointer',
                     boxShadow: point.isActive
-                      ? '0 0 0 1px rgba(201,168,76,0.35), 0 3px 9px rgba(0,0,0,0.4)'
+                      ? '0 0 0 1px rgba(201,168,76,0.4), 0 3px 9px rgba(0,0,0,0.4)'
                       : '0 2px 7px rgba(0,0,0,0.35)',
                   }}
                   aria-label={`${point.country} (${point.count} prosjekter)`}
@@ -207,19 +193,19 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
                 </button>
               </Html>
 
-              {(isHovered || point.isActive) && (
+              {point.isActive && (
                 <Html position={[0, 0.24, 0]} transform sprite occlude={true} distanceFactor={16} zIndexRange={[80, 0]}>
                   <div
                     style={{
                       pointerEvents: 'none',
                       whiteSpace: 'nowrap',
-                      padding: '6px 10px',
-                      borderRadius: '8px',
-                      border: point.isActive ? '1px solid rgba(201,168,76,0.6)' : '1px solid rgba(77,184,158,0.45)',
-                      backgroundColor: 'rgba(9,20,18,0.88)',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(201,168,76,0.5)',
+                      backgroundColor: 'rgba(9,20,18,0.82)',
                       color: '#d7ece7',
-                      fontSize: '12px',
-                      boxShadow: '0 6px 16px rgba(0,0,0,0.45)',
+                      fontSize: '10px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
                     }}
                   >
                     <strong>{point.country}</strong> • {point.count} prosjekter
