@@ -152,6 +152,7 @@ function FlagMarkers({
         if (!flagTexture) return null
         const isHovered = hoveredCountry === point.country
         const isRaised = point.isActive || isHovered
+        const showLabel = point.isActive || isHovered
 
         return (
           <group key={point.country}>
@@ -204,7 +205,7 @@ function FlagMarkers({
               </group>
             </Billboard>
 
-            {point.isActive && (
+            {showLabel && (
               <Html
                 position={[
                   point.markerPosition[0],
@@ -221,16 +222,22 @@ function FlagMarkers({
                   style={{
                     pointerEvents: 'none',
                     whiteSpace: 'nowrap',
-                    padding: '4px 8px',
+                    padding: point.isActive ? '4px 8px' : '3px 7px',
                     borderRadius: '6px',
                     border: '1px solid rgba(201,168,76,0.5)',
                     backgroundColor: 'rgba(9,20,18,0.82)',
                     color: '#d7ece7',
-                    fontSize: '10px',
+                    fontSize: point.isActive ? '10px' : '9px',
                     boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
                   }}
                 >
-                  <strong>{point.country}</strong> • {point.count} prosjekter
+                  {point.isActive ? (
+                    <>
+                      <strong>{point.country}</strong> • {point.count} prosjekter
+                    </>
+                  ) : (
+                    <strong>{point.country}</strong>
+                  )}
                 </div>
               </Html>
             )}
