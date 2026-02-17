@@ -108,7 +108,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
           return (
             <Marker
               key={entry.country}
-              center={coords}
+              position={coords}
               icon={createFlagIcon(flagCode, flagHeight, isActive)}
               eventHandlers={{
                 click: () => {
