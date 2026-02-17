@@ -2731,9 +2731,11 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               </button>
             </div>
           )}
-          <div className="m-4 flex items-center gap-2 rounded-lg border border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.08)] px-4 py-3 text-xs text-[var(--text-muted)]">
-            AI-vurdering: verifiser alltid output manuelt.
-          </div>
+          {view === 'historical' && (
+            <div className="m-4 flex items-center gap-2 rounded-lg border border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.08)] px-4 py-3 text-xs text-[var(--text-muted)]">
+              AI-vurdering: verifiser alltid output manuelt.
+            </div>
+          )}
         </section>
 
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
