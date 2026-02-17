@@ -47,10 +47,11 @@ interface GlobePoint {
   country: string
   count: number
   position: [number, number, number]
+  quaternion: [number, number, number, number]
   flagCode: string
   isActive: boolean
-  markerWidth: number
-  markerHeight: number
+  markerWidthWorld: number
+  markerHeightWorld: number
 }
 
 function normalizeCountryName(value: string): string {
@@ -76,6 +77,12 @@ function latLonToVector3(lat: number, lon: number, radius: number): [number, num
   return [x, y, z]
 }
 
+function getSurfaceQuaternion(position: [number, number, number]): [number, number, number, number] {
+  const normal = new THREE.Vector3(position[0], position[1], position[2]).normalize()
+  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
+  return [quaternion.x, quaternion.y, quaternion.z, quaternion.w]
+}
+
 function EarthGlobe() {
   const earthTexture = useTexture('/textures/earth_atmos_2048.jpg')
   const correctedTexture = useMemo(() => {
@@ -88,7 +95,7 @@ function EarthGlobe() {
   return (
     <group>
       <mesh>
-        <sphereGeometry args={[2.2, 96, 96]} />
+        <sphereGeometry args={[2.05, 96, 96]} />
         <meshStandardMaterial
           map={correctedTexture}
           color="#d9e8e2"
@@ -100,7 +107,7 @@ function EarthGlobe() {
       </mesh>
 
       <mesh>
-        <sphereGeometry args={[2.28, 72, 72]} />
+        <sphereGeometry args={[2.12, 72, 72]} />
         <meshPhongMaterial
           color="#63bfa8"
           transparent
@@ -125,26 +132,43 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
       if (!coords || !flagCode) return []
 
       const [lat, lon] = coords
-      const position = latLonToVector3(lat, lon, 2.34)
+      const position = latLonToVector3(lat, lon, 2.09)
+      const quaternion = getSurfaceQuaternion(position)
       const intensity = Math.sqrt((entry.count || 0) / maxCount)
-      const markerWidth = Math.round(9 + intensity * 4 + (activeCountryKey === key ? 1 : 0))
-      const markerHeight = Math.round(markerWidth * 0.66)
+      const markerWidthWorld = 0.16 + intensity * 0.07 + (activeCountryKey === key ? 0.015 : 0)
+      const markerHeightWorld = markerWidthWorld * 0.66
 
       return [{
         country: entry.country,
         count: entry.count,
         position,
+        quaternion,
         flagCode,
         isActive: activeCountryKey === key,
-        markerWidth,
-        markerHeight,
+        markerWidthWorld,
+        markerHeightWorld,
       }]
     })
   }, [activeCountryKey, countryData, maxCount])
 
+  const flagCodes = useMemo(() => Array.from(new Set(points.map((point) => point.flagCode))), [points])
+  const flagTextures = useTexture(flagCodes.map((code) => `https://flagcdn.com/w160/${code}.png`))
+  const textureByCode = useMemo(() => {
+    const map = new Map<string, THREE.Texture>()
+    flagCodes.forEach((code, index) => {
+      const texture = flagTextures[index]
+      if (!texture) return
+      const clonedTexture = texture.clone()
+      clonedTexture.colorSpace = THREE.SRGBColorSpace
+      clonedTexture.needsUpdate = true
+      map.set(code, clonedTexture)
+    })
+    return map
+  }, [flagCodes, flagTextures])
+
   return (
     <div className="relative w-full h-[400px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
-      <Canvas camera={{ position: [0, 0, 7.8], fov: 40 }} dpr={[1, 2]}>
+      <Canvas camera={{ position: [0, 0, 8.3], fov: 40 }} dpr={[1, 2]}>
         <color attach="background" args={['#0a211b']} />
         <ambientLight intensity={1.05} />
         <hemisphereLight args={['#b7e9dd', '#0b1d18', 0.8]} />
@@ -155,47 +179,32 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
         <EarthGlobe />
 
         {points.map((point) => {
+          const flagTexture = textureByCode.get(point.flagCode)
+          if (!flagTexture) return null
+
           return (
-            <group key={point.country} position={point.position}>
-              <Html transform sprite occlude={true} distanceFactor={9} zIndexRange={[60, 0]}>
-                <button
-                  type="button"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onCountrySelect?.(point.country)
-                  }}
-                  style={{
-                    width: `${point.markerWidth}px`,
-                    height: `${point.markerHeight}px`,
-                    borderRadius: '3px',
-                    overflow: 'hidden',
-                    cursor: 'pointer',
-                    boxShadow: point.isActive
-                      ? '0 0 0 1px rgba(201,168,76,0.4), 0 3px 9px rgba(0,0,0,0.4)'
-                      : '0 2px 7px rgba(0,0,0,0.35)',
-                  }}
-                  aria-label={`${point.country} (${point.count} prosjekter)`}
-                  title={`${point.country}: ${point.count} prosjekter`}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`https://flagcdn.com/${point.flagCode}.svg`}
-                    alt=""
-                    draggable={false}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                      display: 'block',
-                      imageRendering: 'auto',
-                    }}
-                  />
-                </button>
-              </Html>
+            <group key={point.country} position={point.position} quaternion={point.quaternion}>
+              {point.isActive && (
+                <mesh position={[0, 0, -0.003]}>
+                  <planeGeometry args={[point.markerWidthWorld + 0.03, point.markerHeightWorld + 0.03]} />
+                  <meshBasicMaterial color="#c9a84c" transparent opacity={0.75} toneMapped={false} />
+                </mesh>
+              )}
+
+              <mesh
+                position={[0, 0, 0.005]}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onCountrySelect?.(point.country)
+                }}
+              >
+                <planeGeometry args={[point.markerWidthWorld, point.markerHeightWorld]} />
+                <meshBasicMaterial map={flagTexture} transparent toneMapped={false} />
+              </mesh>
 
               {point.isActive && (
-                <Html position={[0, 0.24, 0]} transform sprite occlude={true} distanceFactor={16} zIndexRange={[80, 0]}>
+                <Html position={[0, point.markerHeightWorld * 0.9, 0.05]} transform sprite occlude={true} distanceFactor={16} zIndexRange={[80, 0]}>
                   <div
                     style={{
                       pointerEvents: 'none',
