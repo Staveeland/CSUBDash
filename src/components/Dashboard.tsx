@@ -1764,12 +1764,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       .slice(0, 10)
 
     const coveragePct = viewProjects.length > 0 ? (selectedProjects.length / viewProjects.length) * 100 : 0
+    const useRawYearTotals = view === 'future' && region === 'All'
     const rawXmtForYear = projectYearTotals.xmt[year]
     const rawSurfForYear = projectYearTotals.surf[year]
-    const xmtForYear = Number.isFinite(rawXmtForYear)
+    const xmtForYear = useRawYearTotals && Number.isFinite(rawXmtForYear)
       ? rawXmtForYear
       : selectedProjects.reduce((sum, project) => sum + (project.xmt_count || 0), 0)
-    const surfForYear = Number.isFinite(rawSurfForYear)
+    const surfForYear = useRawYearTotals && Number.isFinite(rawSurfForYear)
       ? rawSurfForYear
       : selectedProjects.reduce((sum, project) => sum + (project.surf_km || 0), 0)
 
@@ -1954,12 +1955,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     const selectedProjects = getProjectsByYear(year)
     const selectedCharts = buildChartsFromProjects(selectedProjects)
     const coveragePct = viewProjects.length > 0 ? (selectedProjects.length / viewProjects.length) * 100 : 0
+    const useRawYearTotals = view === 'future' && region === 'All'
     const rawXmtForYear = projectYearTotals.xmt[year]
     const rawSurfForYear = projectYearTotals.surf[year]
-    const xmtForYear = Number.isFinite(rawXmtForYear)
+    const xmtForYear = useRawYearTotals && Number.isFinite(rawXmtForYear)
       ? rawXmtForYear
       : selectedProjects.reduce((sum, project) => sum + (project.xmt_count || 0), 0)
-    const surfForYear = Number.isFinite(rawSurfForYear)
+    const surfForYear = useRawYearTotals && Number.isFinite(rawSurfForYear)
       ? rawSurfForYear
       : selectedProjects.reduce((sum, project) => sum + (project.surf_km || 0), 0)
 
