@@ -1,31 +1,25 @@
 import { NextResponse } from 'next/server'
 import { requireAllowedApiUser } from '@/lib/auth/require-user'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 
 export async function GET() {
   try {
     const auth = await requireAllowedApiUser()
     if (!auth.ok) return auth.response
-    
-    // Use admin client to bypass RLS policies on new tables
-    const adminClient = createAdminClient()
+    const supabase = auth.supabase
 
     const [projectsRes, contractsRes, awardsRes, xmtRes, surfRes] = await Promise.all([
-      fetchAll(adminClient, 'projects', 'country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category, development_project'),
-      fetchAll(adminClient, 'contracts', 'region, country, contract_type, date'),
-      fetchAll(adminClient, 'upcoming_awards', 'development_project, xmts_awarded, year'),
-      fetchAll(adminClient, 'xmt_data', 'development_project, contract_award_year, xmt_count, state, year'),
-      fetchAll(adminClient, 'surf_data', 'year, km_surf_lines'),
+      fetchAll(supabase, 'projects', 'country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category, development_project'),
+      fetchAll(supabase, 'contracts', 'region, country, contract_type, date'),
+      fetchAll(supabase, 'upcoming_awards', 'development_project, xmts_awarded, year'),
+      fetchAll(supabase, 'xmt_data', 'development_project, contract_award_year, xmt_count, state, year'),
+      fetchAll(supabase, 'surf_data', 'year, km_surf_lines'),
     ])
 
     if (projectsRes.error) throw projectsRes.error
 
     const projects = projectsRes.data || []
     const contracts = contractsRes.error ? [] : contractsRes.data || []
-    const awards = awardsRes.error ? [] : awardsRes.data || []
-    const xmts = xmtRes.error ? [] : xmtRes.data || []
-    const surfs = surfRes.error ? [] : surfRes.data || []
 
     // By country
     const countryMap = new Map<string, number>()
@@ -66,6 +60,9 @@ export async function GET() {
       .sort((a, b) => a.year - b.year)
 
     // Pipeline flow (FEED → Tender → Award → Execution → Closed)
+    const awards = awardsRes.error ? [] : awardsRes.data || []
+    const xmts = xmtRes.error ? [] : xmtRes.data || []
+    const surfs = surfRes.error ? [] : surfRes.data || []
     const currentYear = new Date().getFullYear()
 
     // Also fetch contracts for awarded count
@@ -125,15 +122,15 @@ export async function GET() {
       ...surfByYearMap.keys(),
     ])
 
-    const sortedYears = Array.from(allYears.values()).sort((a, b) => a - b)
+    const xmtByYearProjectData = Array.from(xmtByYearMap.entries())
+      .map(([year, value]) => ({ year, value }))
+      .sort((a, b) => a.year - b.year)
 
-    const xmtByYearProjectData = sortedYears
-      .map((year) => ({ year, value: xmtByYearMap.get(year) ?? 0 }))
+    const surfByYearProjectData = Array.from(surfByYearMap.entries())
+      .map(([year, value]) => ({ year, value }))
+      .sort((a, b) => a.year - b.year)
 
-    const surfByYearProjectData = sortedYears
-      .map((year) => ({ year, value: surfByYearMap.get(year) ?? 0 }))
-
-    const pipelineValueByYear = sortedYears
+    const pipelineValueByYear = Array.from(allYears.values())
       .map((year) => {
         const xmtValue = xmtByYearMap.get(year) ?? 0
         const surfValue = surfByYearMap.get(year) ?? 0
@@ -142,6 +139,7 @@ export async function GET() {
           value: surfValue * 1_000_000 + xmtValue * 120_000,
         }
       })
+      .sort((a, b) => a.year - b.year)
 
     return NextResponse.json({
       byCountry,
