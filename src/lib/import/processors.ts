@@ -827,18 +827,40 @@ async function processPdfContractsJob(supabase: ReturnType<typeof createAdminCli
             } as unknown as OpenAI.Chat.Completions.ChatCompletionContentPartText,
             {
               type: 'text',
-              text: `Extract ALL contract rows from this PDF table. The table has columns: Leverandør (supplier), Operatør (operator), Verdi (value), Omfang (scope), Region/Prosjekt (region/project), Segment, and Varighet (duration/contract period).
+              text: `Extract ALL contract award rows from this PDF. This may be a Rystad "Oilfield Service Contract Update" or similar contract awards document.
 
-Return a JSON array of objects with these exact fields:
-- supplier: string
-- operator: string
-- value: string (keep original format, e.g. "NOK 500M" or "USD 1.2B")
-- scope: string (full description)
-- region: string
-- segment: string
-- duration: string (contract duration/period, e.g. "2025-2028", "3 years", "36 months". Empty string if not found)
+Look for contract tables with columns like: Leverandør/Supplier, Operatør/Operator, Verdi/Value, Omfang/Scope, Region/Project, Segment, Varighet/Duration.
+Also look for any other contract award tables, even if columns are named differently.
 
-Extract EVERY row from ALL pages. Return ONLY the JSON array, no other text.`,
+Return a JSON object with this schema:
+{
+  "contracts": [
+    {
+      "supplier": "string",
+      "operator": "string", 
+      "value": "string (keep original format, e.g. 'NOK 500M', 'USD 1.2B')",
+      "scope": "string (full description of work scope)",
+      "region": "string (geographic region or project name)",
+      "segment": "string (e.g. Subsea, SURF, EPCI, SPS, Topside, Pipeline)",
+      "duration": "string (e.g. '2025-2028', '3 years', empty if not found)"
+    }
+  ],
+  "aggregate_figures": {
+    "total_contract_value": "string or null",
+    "subsea_share": "string or null",
+    "period": "string or null"
+  },
+  "forecasts": [
+    { "year": 2026, "metric": "subsea_spend_usd_bn", "value": 54.3, "unit": "USD bn" }
+  ]
+}
+
+Rules:
+- Extract EVERY contract row from ALL pages
+- For forecasts, look for any spending figures, capex data, or market size numbers mentioned in charts/tables/text
+- Use canonical metric names: subsea_spend_usd_bn, xmt_installations, surf_km, subsea_capex_growth_yoy_pct
+- Regional metrics: europe_subsea_spend_total_usd_bn, south_america_subsea_spend_total_usd_bn, north_america_subsea_spend_total_usd_bn, africa_subsea_spend_total_usd_bn, asia_australia_subsea_spend_total_usd_bn, middle_east_russia_subsea_spend_total_usd_bn
+- Return ONLY the JSON object, no other text.`,
             },
           ],
         },
@@ -847,9 +869,33 @@ Extract EVERY row from ALL pages. Return ONLY the JSON array, no other text.`,
       max_completion_tokens: 16000,
     })
 
-    const content = response.choices[0]?.message?.content || '[]'
-    const jsonMatch = content.match(/\[[\s\S]*\]/)
-    const rows: ContractRow[] = jsonMatch ? JSON.parse(jsonMatch[0]) : []
+    const content = response.choices[0]?.message?.content || '{}'
+    const parsed = parseResponseJsonObject(content)
+    
+    // Support both old format (raw array) and new format (object with contracts key)
+    let rows: ContractRow[]
+    if (Array.isArray(parsed)) {
+      rows = parsed as unknown as ContractRow[]
+    } else if (Array.isArray(parsed.contracts)) {
+      rows = parsed.contracts as ContractRow[]
+    } else {
+      const jsonMatch = content.match(/\[[\s\S]*\]/)
+      rows = jsonMatch ? JSON.parse(jsonMatch[0]) : []
+    }
+
+    // Extract forecasts from contract update PDFs
+    const pdfForecasts = Array.isArray(parsed.forecasts) ? parsed.forecasts : []
+    const normalizedPdfForecasts = pdfForecasts
+      .map((entry: Record<string, unknown>) => {
+        if (!entry || typeof entry !== 'object') return null
+        const year = toYear(entry.year)
+        const value = toNumber(entry.value)
+        const metric = typeof entry.metric === 'string' ? normalizeForecastMetric(entry.metric) : ''
+        const unit = normalizeForecastUnit(entry.unit)
+        if (year === null || value === null || !metric) return null
+        return { year, metric, value, unit, source: 'rystad_contract_update' as const }
+      })
+      .filter(Boolean) as Array<{ year: number; metric: string; value: number; unit: string; source: string }>
 
     const contractRows = rows.map((row) => ({
       date: new Date().toISOString().split('T')[0],
@@ -883,16 +929,28 @@ Extract EVERY row from ALL pages. Return ONLY the JSON array, no other text.`,
       }
     }
 
+    // Upsert any forecasts extracted from the contract update PDF
+    let forecastsImported = 0
+    for (const row of normalizedPdfForecasts) {
+      const { error } = await supabase
+        .from('forecasts')
+        .upsert(row, { onConflict: 'year,metric', ignoreDuplicates: false })
+      if (!error) forecastsImported++
+    }
+
+    const total = rows.length + normalizedPdfForecasts.length
+    const totalImported = imported + forecastsImported
+
     await completeBatch(supabase, batchId, {
-      total: rows.length,
-      imported,
+      total,
+      imported: totalImported,
       skipped,
     })
 
     return {
       batchId,
-      recordsTotal: rows.length,
-      recordsImported: imported,
+      recordsTotal: total,
+      recordsImported: totalImported,
       recordsSkipped: skipped,
     }
   } catch (error) {

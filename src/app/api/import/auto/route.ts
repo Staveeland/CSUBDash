@@ -29,6 +29,16 @@ export async function POST(request: NextRequest) {
     const name = fileName.toLowerCase()
 
     let fileType: ImportJobType
+    const isContractAwards =
+      name.includes('contract update') ||
+      name.includes('contract award') ||
+      name.includes('oilfield service contract') ||
+      name.includes('ofs contract') ||
+      name.includes('contract overview') ||
+      name.includes('award update') ||
+      name.includes('leverandør') ||
+      name.includes('kontrakt')
+
     const isMarketReport =
       name.includes('market report') ||
       name.includes('subsea market') ||
@@ -38,7 +48,9 @@ export async function POST(request: NextRequest) {
       // "report" + quarter indicator (Q1, Q2, 1Q, 2Q, etc.)
       (name.includes('report') && /[1-4]q|q[1-4]/i.test(name))
 
-    if (isMarketReport) {
+    if (isContractAwards) {
+      fileType = 'pdf_contract_awards'
+    } else if (isMarketReport) {
       fileType = 'pdf_market_report'
     } else {
       fileType = 'pdf_contract_awards'

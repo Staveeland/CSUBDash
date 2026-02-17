@@ -46,6 +46,16 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+type QueueFileStatus = 'waiting' | 'uploading' | 'queued' | 'error'
+
+interface QueueItem {
+  file: File
+  status: QueueFileStatus
+  error?: string
+  jobId?: string
+  detectedType?: string
+}
+
 function UploadZone({
   title,
   description,
@@ -57,80 +67,95 @@ function UploadZone({
   endpoint: string
   onQueued: () => void
 }) {
-  const [file, setFile] = useState<File | null>(null)
+  const [queue, setQueue] = useState<QueueItem[]>([])
   const [uploading, setUploading] = useState(false)
-  const [stage, setStage] = useState<string>('')
-  const [result, setResult] = useState<ImportResult | null>(null)
   const [dragOver, setDragOver] = useState(false)
 
   const maxSizeBytes = endpoint.includes('excel') ? 10 * 1024 * 1024 : 25 * 1024 * 1024
 
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const items: QueueItem[] = []
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]
+      if (f.size > maxSizeBytes) {
+        items.push({ file: f, status: 'error', error: `Too large (max ${Math.round(maxSizeBytes / 1024 / 1024)}MB)` })
+      } else {
+        items.push({ file: f, status: 'waiting' })
+      }
+    }
+    setQueue((prev) => [...prev, ...items])
+  }, [maxSizeBytes])
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
-    const dropped = e.dataTransfer.files[0]
-    if (!dropped) return
-    if (dropped.size > maxSizeBytes) {
-      setResult({
-        success: false,
-        error: `Filen er for stor. Maks ${Math.round(maxSizeBytes / 1024 / 1024)}MB.`,
-      })
-      return
+    if (e.dataTransfer.files.length > 0) {
+      addFiles(e.dataTransfer.files)
     }
-    setResult(null)
-    setFile(dropped)
-  }, [maxSizeBytes])
+  }, [addFiles])
 
-  const handleUpload = async () => {
-    if (!file) return
+  const handleUploadAll = async () => {
+    const waitingIndices = queue
+      .map((item, i) => (item.status === 'waiting' ? i : -1))
+      .filter((i) => i >= 0)
 
+    if (waitingIndices.length === 0) return
     setUploading(true)
-    setResult(null)
 
-    try {
-      const supabase = createClient()
-      const cleanName = sanitizeFileName(file.name)
-      const storagePath = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${cleanName}`
+    for (const idx of waitingIndices) {
+      setQueue((prev) => prev.map((item, i) => i === idx ? { ...item, status: 'uploading' } : item))
 
-      setStage('Laster opp fil til storage...')
-      const { error: uploadError } = await supabase
-        .storage
-        .from('imports')
-        .upload(storagePath, file, {
-          contentType: file.type || undefined,
-          upsert: false,
+      try {
+        const file = queue[idx].file
+        const supabase = createClient()
+        const cleanName = sanitizeFileName(file.name)
+        const storagePath = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${cleanName}`
+
+        const { error: uploadError } = await supabase
+          .storage
+          .from('imports')
+          .upload(storagePath, file, {
+            contentType: file.type || undefined,
+            upsert: false,
+          })
+
+        if (uploadError) throw new Error(uploadError.message)
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_name: file.name,
+            file_size_bytes: file.size,
+            storage_bucket: 'imports',
+            storage_path: storagePath,
+          }),
         })
 
-      if (uploadError) {
-        throw new Error(uploadError.message)
+        const data = (await res.json()) as ImportResult
+        if (!res.ok || !data.success) throw new Error(data.error || `Request failed (${res.status})`)
+
+        setQueue((prev) => prev.map((item, i) =>
+          i === idx ? { ...item, status: 'queued', jobId: data.job_id, detectedType: data.detected_type } : item
+        ))
+        onQueued()
+      } catch (err) {
+        setQueue((prev) => prev.map((item, i) =>
+          i === idx ? { ...item, status: 'error', error: String(err) } : item
+        ))
       }
-
-      setStage('Oppretter importjobb...')
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          file_name: file.name,
-          file_size_bytes: file.size,
-          storage_bucket: 'imports',
-          storage_path: storagePath,
-        }),
-      })
-
-      const data = (await res.json()) as ImportResult
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || `Request failed (${res.status})`)
-      }
-
-      setResult(data)
-      setStage('Importjobb er satt i kø')
-      onQueued()
-    } catch (err) {
-      setResult({ success: false, error: String(err) })
-      setStage('')
-    } finally {
-      setUploading(false)
     }
+
+    setUploading(false)
+  }
+
+  const waitingCount = queue.filter((i) => i.status === 'waiting').length
+
+  const statusIcon: Record<QueueFileStatus, string> = {
+    waiting: '⏳',
+    uploading: '⬆️',
+    queued: '✅',
+    error: '❌',
   }
 
   return (
@@ -153,61 +178,61 @@ function UploadZone({
         onClick={() => {
           const input = document.createElement('input')
           input.type = 'file'
+          input.multiple = true
           input.accept = endpoint.includes('excel') ? '.xlsx' : '.pdf'
           input.onchange = (event) => {
-            const selected = (event.target as HTMLInputElement).files?.[0]
-            if (!selected) return
-            if (selected.size > maxSizeBytes) {
-              setResult({
-                success: false,
-                error: `Filen er for stor. Maks ${Math.round(maxSizeBytes / 1024 / 1024)}MB.`,
-              })
-              return
-            }
-            setResult(null)
-            setFile(selected)
+            const selected = (event.target as HTMLInputElement).files
+            if (selected && selected.length > 0) addFiles(selected)
           }
           input.click()
         }}
       >
-        {file ? (
+        {queue.length > 0 ? (
           <div>
-            <p className="font-medium text-white">{file.name}</p>
-            <p className="text-sm text-[var(--text-muted)]">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+            <p className="font-medium text-white">{queue.length} file{queue.length !== 1 ? 's' : ''} selected</p>
+            <p className="text-sm text-[var(--text-muted)]">Drop more or click to add</p>
           </div>
         ) : (
-          <p className="text-[var(--text-muted)]">Drop file here or click to select</p>
+          <p className="text-[var(--text-muted)]">Drop files here or click to select</p>
         )}
       </div>
-      <p className="mt-2 text-xs text-[var(--text-muted)]">Maks filstørrelse: {Math.round(maxSizeBytes / 1024 / 1024)}MB</p>
+      <p className="mt-2 text-xs text-[var(--text-muted)]">Max file size: {Math.round(maxSizeBytes / 1024 / 1024)}MB · Multiple files supported</p>
 
-      <button
-        onClick={handleUpload}
-        disabled={!file || uploading}
-        className="mt-4 px-4 py-2 bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold rounded-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-      >
-        {uploading ? 'Uploading...' : 'Import'}
-      </button>
-
-      {stage && <p className="mt-3 text-xs text-[var(--text-muted)]">{stage}</p>}
-
-      {result && (
-        <div className={`mt-4 p-3 rounded-lg text-sm ${
-          result.success
-            ? 'bg-[rgba(34,197,94,0.1)] text-[#22c55e] border border-[rgba(34,197,94,0.2)]'
-            : 'bg-[rgba(239,68,68,0.1)] text-[#ef4444] border border-[rgba(239,68,68,0.2)]'
-        }`}>
-          {result.success ? (
-            <div>
-              <p className="font-medium">✅ Job queued</p>
-              <p>Job ID: {result.job_id}</p>
-              {result.detected_type && <p>Detected: {result.detected_type}</p>}
+      {queue.length > 0 && (
+        <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
+          {queue.map((item, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs py-1 px-2 rounded bg-[rgba(10,23,20,0.5)]">
+              <span>{statusIcon[item.status]}</span>
+              <span className="truncate flex-1 text-white">{item.file.name}</span>
+              <span className="text-[var(--text-muted)] whitespace-nowrap">{(item.file.size / 1024 / 1024).toFixed(1)}MB</span>
+              {item.status === 'queued' && item.detectedType && (
+                <span className="text-[#4db89e] whitespace-nowrap">{item.detectedType}</span>
+              )}
+              {item.status === 'error' && (
+                <span className="text-[#ef4444] truncate max-w-[120px]" title={item.error}>{item.error}</span>
+              )}
             </div>
-          ) : (
-            <p>❌ {result.error}</p>
-          )}
+          ))}
         </div>
       )}
+
+      <div className="flex gap-2 mt-4">
+        <button
+          onClick={handleUploadAll}
+          disabled={waitingCount === 0 || uploading}
+          className="px-4 py-2 bg-[var(--csub-light)] text-[var(--csub-dark)] font-semibold rounded-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        >
+          {uploading ? 'Uploading...' : waitingCount > 1 ? `Import ${waitingCount} files` : 'Import'}
+        </button>
+        {queue.length > 0 && !uploading && (
+          <button
+            onClick={() => setQueue([])}
+            className="px-4 py-2 text-[var(--text-muted)] hover:text-white transition-colors text-sm"
+          >
+            Clear
+          </button>
+        )}
+      </div>
     </div>
   )
 }
