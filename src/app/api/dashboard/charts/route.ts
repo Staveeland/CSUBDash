@@ -1,18 +1,21 @@
 import { NextResponse } from 'next/server'
 import { requireAllowedApiUser } from '@/lib/auth/require-user'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 
 export async function GET() {
   try {
     const auth = await requireAllowedApiUser()
     if (!auth.ok) return auth.response
-    const supabase = auth.supabase
+    
+    // Use admin client to bypass RLS policies on new tables
+    const adminClient = createAdminClient()
 
     const [projectsRes, contractsRes, awardsRes, xmtRes] = await Promise.all([
-      fetchAll(supabase, 'projects', 'country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category, development_project'),
-      fetchAll(supabase, 'contracts', 'region, country, contract_type, award_date'),
-      fetchAll(supabase, 'upcoming_awards', 'development_project, xmts_awarded, year'),
-      fetchAll(supabase, 'xmt_data', 'development_project, contract_award_year, xmt_count, state'),
+      fetchAll(adminClient, 'projects', 'country, continent, water_depth_category, first_year, last_year, xmt_count, surf_km, facility_category, development_project'),
+      fetchAll(adminClient, 'contracts', 'region, country, contract_type, award_date'),
+      fetchAll(adminClient, 'upcoming_awards', 'development_project, xmts_awarded, year'),
+      fetchAll(adminClient, 'xmt_data', 'development_project, contract_award_year, xmt_count, state'),
     ])
 
     if (projectsRes.error) throw projectsRes.error
