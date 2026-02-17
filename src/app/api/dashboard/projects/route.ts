@@ -10,6 +10,34 @@ function parseYear(value: string | null | undefined): number | null {
   return parsed.getUTCFullYear()
 }
 
+const PAGE_SIZE = 1000
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchAll(
+  supabase: any,
+  table: string,
+  select: string
+): Promise<{ data: any[]; error: { message: string } | null }> {
+  const allRows: any[] = []
+  let from = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .range(from, from + PAGE_SIZE - 1)
+
+    if (error) return { data: allRows, error }
+    if (!data || data.length === 0) break
+
+    allRows.push(...data)
+    if (data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+
+  return { data: allRows, error: null }
+}
+
 export async function GET() {
   try {
     const auth = await requireAllowedApiUser()
@@ -17,9 +45,7 @@ export async function GET() {
     const supabase = auth.supabase
 
     const [projectsRes, contractsRes] = await Promise.all([
-      supabase
-        .from('projects')
-        .select(`
+      fetchAll(supabase, 'projects', `
           development_project,
           asset,
           country,
@@ -33,11 +59,8 @@ export async function GET() {
           first_year,
           last_year,
           created_at
-        `)
-        .limit(5000),
-      supabase
-        .from('contracts')
-        .select(`
+        `),
+      fetchAll(supabase, 'contracts', `
           project_name,
           title,
           contract_name,
@@ -50,8 +73,7 @@ export async function GET() {
           award_date,
           created_at,
           water_depth_m
-        `)
-        .limit(5000),
+        `),
     ])
 
     if (projectsRes.error) {
