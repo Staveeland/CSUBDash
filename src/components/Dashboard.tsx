@@ -2259,7 +2259,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     : null
 
   return (
-    <div className="min-h-screen bg-[var(--bg-dark)] text-gray-100">
+    <div className="min-h-screen bg-[#070E13] text-gray-100">
       <header className="sticky top-0 z-50 border-b border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.95)] backdrop-blur">
         <div className="max-w-[1600px] mx-auto h-16 px-4 md:px-8 flex items-center justify-between">
           <div className="flex items-center gap-4">
