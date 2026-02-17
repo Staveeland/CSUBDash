@@ -985,7 +985,7 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
   ])
 
   const projectHighlights = filteredProjects
-    .slice(0, 20)
+    .slice(0, 50)
     .map((project) => ({
       project: project.development_project,
       country: project.country,
@@ -997,8 +997,33 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
       subsea_units: Number(project.subsea_unit_count.toFixed(0)),
     }))
 
+  // Top XMT projects from xmt_data table (per-year detail)
+  const xmtTopProjects = [...filteredXmt]
+    .sort((a, b) => b.xmt_count - a.xmt_count)
+    .slice(0, 50)
+    .map((row) => ({
+      project: row.development_project,
+      country: row.country,
+      operator: row.operator,
+      contractor: row.surf_contractor,
+      year: row.year,
+      xmt_count: row.xmt_count,
+    }))
+
+  // Top SURF projects
+  const surfTopProjects = [...filteredSurf]
+    .sort((a, b) => b.km_surf_lines - a.km_surf_lines)
+    .slice(0, 30)
+    .map((row) => ({
+      project: row.development_project,
+      country: row.country,
+      operator: row.operator,
+      year: row.year,
+      km_surf: Number(row.km_surf_lines.toFixed(1)),
+    }))
+
   const contractHighlights = filteredContracts
-    .slice(0, 20)
+    .slice(0, 30)
     .map((contract) => ({
       project: contract.project_name,
       country: contract.country,
@@ -1087,6 +1112,8 @@ async function collectAndFilterData(plan: AgentPlan): Promise<DataSummary> {
     top_countries: countryRank,
     top_operators: operatorRank,
     project_highlights: projectHighlights,
+    xmt_top_projects: xmtTopProjects,
+    surf_top_projects: surfTopProjects,
     contract_highlights: contractHighlights,
     forecast_highlights: forecastsByMetric,
     xmt_by_year: xmtYearly,
@@ -1258,7 +1285,7 @@ async function generateAgentOutput(
     const response = await getOpenAIClient().chat.completions.create({
       model: 'gpt-5.2',
       temperature: 0.2,
-      max_completion_tokens: 6400,
+      max_completion_tokens: 12000,
       messages: [
         {
           role: 'user',
