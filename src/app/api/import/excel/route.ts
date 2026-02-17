@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const validation = validateQueuedUploadInput(body ?? {}, {
-      allowedExtensions: ['.xlsx'],
+      allowedExtensions: ['.xlsx', '.xlsb'],
       maxBytes: 10 * 1024 * 1024,
     })
 

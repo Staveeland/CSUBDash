@@ -179,7 +179,7 @@ function UploadZone({
           const input = document.createElement('input')
           input.type = 'file'
           input.multiple = true
-          input.accept = endpoint.includes('excel') ? '.xlsx' : '.pdf'
+          input.accept = endpoint.includes('excel') ? '.xlsx,.xlsb' : '.pdf'
           input.onchange = (event) => {
             const selected = (event.target as HTMLInputElement).files
             if (selected && selected.length > 0) addFiles(selected)
@@ -289,8 +289,8 @@ export default function ImportPage() {
         {/* Upload Zones */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
           <UploadZone
-            title="Rystad Excel (Forecast/EPC)"
-            description="Upload XMTs, Surf lines, Subsea Units and Upcoming awards Excel file"
+            title="Rystad Excel (Kommende prosjekter)"
+            description="Upload forecast Excel files (.xlsx/.xlsb) for upcoming projects only (not historical awards)"
             endpoint="/api/import/excel"
             onQueued={loadJobs}
           />
