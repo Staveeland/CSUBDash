@@ -112,6 +112,7 @@ interface PipelinePoint {
 interface ActivityItem {
   title: string
   meta: string
+  url?: string
 }
 
 type TableSortDirection = 'asc' | 'desc'
@@ -1516,6 +1517,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         return {
           title: `${event.competitor_name}: ${event.title}`,
           meta: `${event.source} • ${dateLabel}`,
+          url: event.url,
         }
       })
     }
@@ -2536,13 +2538,29 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             ) : (
               <div className="flex flex-col gap-4">
                 {activityFeed.map((item) => (
-                  <div key={`${item.title}-${item.meta}`} className="flex items-start gap-3 pb-4 border-b border-[var(--csub-light-faint)] last:border-b-0">
-                    <div className="w-2.5 h-2.5 mt-1.5 rounded-full bg-[var(--csub-gold)] shrink-0 shadow-[0_0_8px_var(--csub-gold)]" />
-                    <div>
-                      <p className="text-sm text-gray-100">{item.title}</p>
-                      <p className="text-xs text-[var(--csub-light)] font-mono mt-1">{item.meta}</p>
+                  item.url ? (
+                    <a
+                      key={`${item.title}-${item.meta}`}
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group flex items-start gap-3 rounded-md pb-4 border-b border-[var(--csub-light-faint)] last:border-b-0 hover:bg-[color:rgba(77,184,158,0.08)] transition-colors"
+                    >
+                      <div className="w-2.5 h-2.5 mt-1.5 rounded-full bg-[var(--csub-gold)] shrink-0 shadow-[0_0_8px_var(--csub-gold)]" />
+                      <div>
+                        <p className="text-sm text-gray-100 group-hover:text-white">{item.title}</p>
+                        <p className="text-xs text-[var(--csub-light)] font-mono mt-1">{item.meta}</p>
+                      </div>
+                    </a>
+                  ) : (
+                    <div key={`${item.title}-${item.meta}`} className="flex items-start gap-3 pb-4 border-b border-[var(--csub-light-faint)] last:border-b-0">
+                      <div className="w-2.5 h-2.5 mt-1.5 rounded-full bg-[var(--csub-gold)] shrink-0 shadow-[0_0_8px_var(--csub-gold)]" />
+                      <div>
+                        <p className="text-sm text-gray-100">{item.title}</p>
+                        <p className="text-xs text-[var(--csub-light)] font-mono mt-1">{item.meta}</p>
+                      </div>
                     </div>
-                  </div>
+                  )
                 ))}
               </div>
             )}
