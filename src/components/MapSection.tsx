@@ -1,7 +1,7 @@
 'use client'
 
 import { Canvas } from '@react-three/fiber'
-import { Billboard, Html, Line, OrbitControls, Stars, useTexture } from '@react-three/drei'
+import { Billboard, Line, OrbitControls, Stars, useTexture } from '@react-three/drei'
 import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 
@@ -98,24 +98,26 @@ function EarthGlobe() {
 function LedNodes({
   points,
   onCountrySelect,
+  onCountryHover,
 }: {
   points: GlobePoint[]
   onCountrySelect?: (country: string) => void
+  onCountryHover?: (country: string | null) => void
 }) {
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
 
   useEffect(() => {
     return () => {
       document.body.style.cursor = 'auto'
+      onCountryHover?.(null)
     }
-  }, [])
+  }, [onCountryHover])
 
   return (
     <>
       {points.map((point) => {
         const isHovered = hoveredCountry === point.country
         const isActive = point.isActive || isHovered
-        const showLabel = point.isActive || isHovered
         const stemColor = point.isActive ? '#c9a84c' : '#4db89e'
         const glowColor = point.isActive ? '#c9a84c' : '#4db89e'
         const ringColor = point.isActive ? '#c9a84c' : '#53bfa5'
@@ -165,12 +167,14 @@ function LedNodes({
                   onPointerOver={(event) => {
                     event.stopPropagation()
                     setHoveredCountry(point.country)
+                    onCountryHover?.(point.country)
                     document.body.style.cursor = 'pointer'
                   }}
                   onPointerOut={(event) => {
                     event.stopPropagation()
                     document.body.style.cursor = 'auto'
                     setHoveredCountry((prev) => (prev === point.country ? null : prev))
+                    onCountryHover?.(null)
                   }}
                   onClick={(event) => {
                     event.stopPropagation()
@@ -188,43 +192,6 @@ function LedNodes({
                 </mesh>
               </group>
             </Billboard>
-
-            {showLabel && (
-              <Html
-                position={[
-                  point.markerPosition[0],
-                  point.markerPosition[1] + point.glowRadiusWorld * 2.55 + 0.02,
-                  point.markerPosition[2],
-                ]}
-                transform
-                sprite
-                occlude={true}
-                distanceFactor={15}
-                zIndexRange={[80, 0]}
-              >
-                <div
-                  style={{
-                    pointerEvents: 'none',
-                    whiteSpace: 'nowrap',
-                    padding: point.isActive ? '6px 9px' : '5px 8px',
-                    borderRadius: '6px',
-                    border: '1px solid rgba(201,168,76,0.5)',
-                    backgroundColor: 'rgba(9,20,18,0.82)',
-                    color: '#d7ece7',
-                    fontSize: point.isActive ? '10px' : '9px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-                  }}
-                >
-                  <div><strong>{point.country}</strong></div>
-                  <div style={{ marginTop: 2, opacity: 0.92 }}>
-                    {point.count.toLocaleString('en-US')} prosjekter • {point.sharePct.toFixed(1)}%
-                  </div>
-                  <div style={{ marginTop: 1, opacity: 0.78 }}>
-                    Rang #{point.rank}
-                  </div>
-                </div>
-              </Html>
-            )}
           </group>
         )
       })}
@@ -234,6 +201,7 @@ function LedNodes({
 
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
   const activeCountryKey = normalizeCountryName(activeCountry ?? '')
+  const [hoveredCountryKey, setHoveredCountryKey] = useState<string | null>(null)
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
   const totalCount = Math.max(countryData.reduce((sum, item) => sum + (item.count || 0), 0), 1)
   const rankByCountryKey = useMemo(() => {
@@ -280,6 +248,19 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
     })
   }, [activeCountryKey, countryData, maxCount, rankByCountryKey, totalCount])
 
+  const hoveredPoint = useMemo(() => {
+    if (!hoveredCountryKey) return null
+    return points.find((point) => normalizeCountryName(point.country) === hoveredCountryKey) ?? null
+  }, [hoveredCountryKey, points])
+
+  const activePoint = useMemo(() => {
+    if (!activeCountryKey) return null
+    return points.find((point) => normalizeCountryName(point.country) === activeCountryKey) ?? null
+  }, [activeCountryKey, points])
+
+  const infoPoint = hoveredPoint ?? activePoint
+  const infoStateLabel = hoveredPoint ? 'HOVER' : activePoint ? 'VALGT' : null
+
   return (
     <div className="relative w-full h-[430px] md:h-[460px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
       <Canvas camera={{ position: [0, 0, 7.4], fov: 38 }} dpr={[1, 2]}>
@@ -291,7 +272,11 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
 
         <Stars radius={70} depth={30} count={1100} factor={2} saturation={0} fade speed={0.25} />
         <EarthGlobe />
-        <LedNodes points={points} onCountrySelect={onCountrySelect} />
+        <LedNodes
+          points={points}
+          onCountrySelect={onCountrySelect}
+          onCountryHover={(country) => setHoveredCountryKey(country ? normalizeCountryName(country) : null)}
+        />
 
         <OrbitControls
           enablePan={false}
@@ -304,6 +289,21 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
           dampingFactor={0.08}
         />
       </Canvas>
+
+      {infoPoint && (
+        <div className="pointer-events-none absolute right-3 top-3 rounded-lg border border-[var(--csub-gold-soft)] bg-[rgba(8,20,17,0.9)] px-3 py-2.5 text-[11px] leading-snug text-gray-100 shadow-[0_8px_22px_rgba(0,0,0,0.45)] backdrop-blur-sm">
+          {infoStateLabel && (
+            <div className="mb-1 text-[9px] uppercase tracking-[0.14em] text-[var(--csub-light)]">{infoStateLabel}</div>
+          )}
+          <div className="text-sm font-semibold text-white">{infoPoint.country}</div>
+          <div className="mt-1 text-[var(--csub-light)]">
+            {infoPoint.count.toLocaleString('en-US')} prosjekter
+          </div>
+          <div className="text-[var(--text-muted)]">
+            {infoPoint.sharePct.toFixed(1)}% av total • Rang #{infoPoint.rank}
+          </div>
+        </div>
+      )}
 
       <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-[var(--csub-light-soft)] bg-[rgba(8,20,17,0.8)] px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
         Hold mouse to rotate globe
