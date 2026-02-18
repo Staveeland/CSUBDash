@@ -95,6 +95,35 @@ function EarthGlobe() {
   )
 }
 
+function GlobeInteractionShield({
+  onBackgroundHover,
+}: {
+  onBackgroundHover: () => void
+}) {
+  return (
+    <mesh
+      onPointerOver={(event) => {
+        event.stopPropagation()
+        document.body.style.cursor = 'auto'
+        onBackgroundHover()
+      }}
+      onPointerMove={(event) => {
+        event.stopPropagation()
+        document.body.style.cursor = 'auto'
+        onBackgroundHover()
+      }}
+      onClick={(event) => {
+        event.stopPropagation()
+        document.body.style.cursor = 'auto'
+        onBackgroundHover()
+      }}
+    >
+      <sphereGeometry args={[2.225, 80, 80]} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} toneMapped={false} />
+    </mesh>
+  )
+}
+
 function LedNodes({
   points,
   onCountrySelect,
@@ -275,6 +304,7 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
 
         <Stars radius={70} depth={30} count={1100} factor={2} saturation={0} fade speed={0.25} />
         <EarthGlobe />
+        <GlobeInteractionShield onBackgroundHover={() => setHoveredCountryKey(null)} />
         <LedNodes
           points={points}
           onCountrySelect={onCountrySelect}
