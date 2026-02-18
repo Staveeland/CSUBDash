@@ -6,9 +6,12 @@ Add these in Vercel Dashboard → Settings → Environment Variables:
 |----------|-------|
 | `IMPORT_WORKER_SECRET` | (random long secret) |
 | `APP_BASE_URL` | `https://<your-vercel-domain>` |
+| `COMPETITOR_SYNC_SECRET` | (random long secret, or same as `CRON_SECRET`) |
+| `CRON_SECRET` | (same value as `COMPETITOR_SYNC_SECRET` if using Vercel Cron) |
 
 > `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` should already be set.
 > `APP_BASE_URL` is used by the Supabase Edge Function `process-import-job` to call `/api/import/process`.
+> `COMPETITOR_SYNC_SECRET`/`CRON_SECRET` protects `/api/competitors/sync`.
 
 ## Auth Setup (Microsoft 365 via Supabase)
 

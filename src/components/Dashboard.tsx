@@ -86,6 +86,21 @@ interface ReportRecord {
   created_at: string
 }
 
+interface CompetitorEvent {
+  id: string
+  competitor_name: string
+  title: string
+  summary: string | null
+  source: string
+  url: string
+  published_at: string | null
+  event_date: string | null
+  signal_type: string
+  relevance_score: number
+  importance: 'high' | 'medium' | 'low'
+  is_upcoming: boolean
+}
+
 type RegionFilter = 'All' | 'NorthSea' | 'GoM'
 type DashboardView = 'historical' | 'future'
 
@@ -822,6 +837,23 @@ function formatReportDate(dateValue: string): string {
   return parsed.toLocaleDateString('nb-NO')
 }
 
+function formatRelativeTime(dateValue: string | null): string {
+  if (!dateValue) return 'Nylig'
+  const parsed = new Date(dateValue)
+  if (Number.isNaN(parsed.getTime())) return 'Nylig'
+  const diffMs = Date.now() - parsed.getTime()
+  if (diffMs < 0) return formatReportDate(parsed.toISOString())
+
+  const hour = 60 * 60 * 1000
+  const day = 24 * hour
+  if (diffMs < hour) return 'Mindre enn 1 time siden'
+  if (diffMs < day) return `${Math.round(diffMs / hour)} timer siden`
+  const days = Math.round(diffMs / day)
+  if (days <= 1) return '1 dag siden'
+  if (days <= 30) return `${days} dager siden`
+  return formatReportDate(parsed.toISOString())
+}
+
 function LoadingPlaceholder({ text = 'Laster...' }: { text?: string }) {
   return <div className="text-center py-6 text-sm text-[var(--text-muted)] animate-pulse">{text}</div>
 }
@@ -871,6 +903,8 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [forecasts, setForecasts] = useState<ForecastRecord[]>([])
   const [reports, setReports] = useState<ReportRecord[]>([])
   const [marketLoading, setMarketLoading] = useState(true)
+  const [competitorEvents, setCompetitorEvents] = useState<CompetitorEvent[]>([])
+  const [competitorLoading, setCompetitorLoading] = useState(true)
   const [expandedReport, setExpandedReport] = useState<string | null>(null)
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
   const [reportDeletePendingId, setReportDeletePendingId] = useState<string | null>(null)
@@ -1011,6 +1045,51 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   useEffect(() => {
     void fetchMarketData()
   }, [fetchMarketData])
+
+  const fetchCompetitorEvents = useCallback(async () => {
+    setCompetitorLoading(true)
+    try {
+      const res = await fetch('/api/dashboard/competitor-events')
+      if (!res.ok) throw new Error(`Competitor events API returned ${res.status}`)
+      const data = await res.json()
+      const rows: unknown[] = Array.isArray(data?.events) ? data.events as unknown[] : []
+
+      const normalized: CompetitorEvent[] = rows
+        .map((row: unknown): CompetitorEvent => {
+          const record = row && typeof row === 'object' ? row as Record<string, unknown> : {}
+          const importanceRaw = String(record.importance ?? 'low').toLowerCase()
+          const importance: CompetitorEvent['importance'] =
+            importanceRaw === 'high' || importanceRaw === 'medium' ? importanceRaw : 'low'
+
+          return {
+            id: String(record.id ?? ''),
+            competitor_name: String(record.competitor_name ?? ''),
+            title: String(record.title ?? ''),
+            summary: typeof record.summary === 'string' ? record.summary : null,
+            source: String(record.source ?? ''),
+            url: String(record.url ?? ''),
+            published_at: typeof record.published_at === 'string' ? record.published_at : null,
+            event_date: typeof record.event_date === 'string' ? record.event_date : null,
+            signal_type: String(record.signal_type ?? 'other'),
+            relevance_score: Number(record.relevance_score ?? 0),
+            importance,
+            is_upcoming: Boolean(record.is_upcoming),
+          }
+        })
+        .filter((event) => event.id.length > 0 && event.title.length > 0 && event.competitor_name.length > 0)
+
+      setCompetitorEvents(normalized)
+    } catch (error) {
+      console.error('Failed to load competitor events:', error)
+      setCompetitorEvents([])
+    } finally {
+      setCompetitorLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchCompetitorEvents()
+  }, [fetchCompetitorEvents])
 
   // Derived market data
   const spendingByYear = useMemo(() => {
@@ -1431,6 +1510,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   }, [viewProjects.length, pipelineCounts])
 
   const activityFeed = useMemo<ActivityItem[]>(() => {
+    if (view === 'future') {
+      return competitorEvents.slice(0, 5).map((event) => {
+        const dateLabel = event.event_date ? `Forventet ${formatReportDate(event.event_date)}` : formatRelativeTime(event.published_at)
+        return {
+          title: `${event.competitor_name}: ${event.title}`,
+          meta: `${event.source} • ${dateLabel}`,
+        }
+      })
+    }
+
     const timeline = ['2 timer siden', '5 timer siden', '1 dag siden', '2 dager siden', '3 dager siden']
     const selected = filteredProjects.slice(0, 5)
     if (!selected.length) return []
@@ -1438,7 +1527,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       title: `${project.development_project || 'Ukjent prosjekt'} - ${project.country || 'Ukjent marked'}`,
       meta: `${project.operator || project.surf_contractor || 'CSUB team'} • ${timeline[index] ?? 'Nylig'}`,
     }))
-  }, [filteredProjects])
+  }, [competitorEvents, filteredProjects, view])
 
   const openDrawer = (project: Project) => {
     setInsight(null)
@@ -2254,6 +2343,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
   const clickableCardClass = 'cursor-pointer transition-colors hover:border-[var(--csub-gold-soft)] hover:bg-[color:rgba(77,184,158,0.08)]'
   const isInsightOpen = Boolean(insight)
+  const activityLoading = loading || (view === 'future' && competitorLoading)
   const activeInsightCountry = insight?.id.startsWith('country-')
     ? insight.title.replace(/^Land:\s*/i, '')
     : null
@@ -2436,7 +2526,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
           <Panel title="Siste hendelser">
             {!activityFeed.length ? (
-              <LoadingPlaceholder text={loading ? 'Laster hendelser...' : 'Ingen hendelser for valgt filter'} />
+              <LoadingPlaceholder text={
+                activityLoading
+                  ? 'Laster hendelser...'
+                  : view === 'future'
+                    ? 'Ingen relevante konkurrenthendelser for kommende prosjekter'
+                    : 'Ingen hendelser for valgt filter'
+              } />
             ) : (
               <div className="flex flex-col gap-4">
                 {activityFeed.map((item) => (

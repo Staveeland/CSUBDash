@@ -35,6 +35,14 @@ Built by [Workflows AS](https://workflows.no) for CSUB AS.
 ## Database
 Schema is in `supabase/migrations/001_initial_schema.sql`
 
+Competitor intelligence feed is stored in `public.competitor_events` (`supabase/migrations/008_competitor_events.sql`).
+
+## Competitor Scraping
+- Sync endpoint: `GET/POST /api/competitors/sync`
+- Dashboard endpoint: `GET /api/dashboard/competitor-events`
+- Data source: Google News RSS per competitor company with subsea/offshore query filters
+- Enrichment: deterministic relevance scoring + optional AI enrichment when `OPENAI_API_KEY` is set
+
 ## Authentication
 - Login is handled via Microsoft 365 OAuth.
 - Only users with these email domains are allowed:

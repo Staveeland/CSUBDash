@@ -4,7 +4,7 @@ import { isAllowedEmailDomain } from '@/lib/auth/allowlist'
 
 const AUTH_ENTRY_PATHS = new Set(['/auth/login', '/auth/callback'])
 const PUBLIC_PATHS = new Set(['/auth/logout'])
-const PUBLIC_API_PATHS = new Set(['/api/import/process'])
+const PUBLIC_API_PATHS = new Set(['/api/import/process', '/api/competitors/sync'])
 
 function isAuthEntryPath(pathname: string): boolean {
   return AUTH_ENTRY_PATHS.has(pathname)
