@@ -98,25 +98,24 @@ function EarthGlobe() {
 function LedNodes({
   points,
   onCountrySelect,
+  hoveredCountryKey,
   onCountryHover,
 }: {
   points: GlobePoint[]
   onCountrySelect?: (country: string) => void
+  hoveredCountryKey: string | null
   onCountryHover?: (country: string | null) => void
 }) {
-  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null)
-
   useEffect(() => {
     return () => {
       document.body.style.cursor = 'auto'
-      onCountryHover?.(null)
     }
-  }, [onCountryHover])
+  }, [])
 
   return (
     <>
       {points.map((point) => {
-        const isHovered = hoveredCountry === point.country
+        const isHovered = hoveredCountryKey === normalizeCountryName(point.country)
         const isActive = point.isActive || isHovered
         const stemColor = point.isActive ? '#c9a84c' : '#4db89e'
         const glowColor = point.isActive ? '#c9a84c' : '#4db89e'
@@ -166,14 +165,12 @@ function LedNodes({
                   onPointerDown={(event) => event.stopPropagation()}
                   onPointerOver={(event) => {
                     event.stopPropagation()
-                    setHoveredCountry(point.country)
-                    onCountryHover?.(point.country)
+                    onCountryHover?.(normalizeCountryName(point.country))
                     document.body.style.cursor = 'pointer'
                   }}
                   onPointerOut={(event) => {
                     event.stopPropagation()
                     document.body.style.cursor = 'auto'
-                    setHoveredCountry((prev) => (prev === point.country ? null : prev))
                     onCountryHover?.(null)
                   }}
                   onClick={(event) => {
@@ -275,7 +272,8 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
         <LedNodes
           points={points}
           onCountrySelect={onCountrySelect}
-          onCountryHover={(country) => setHoveredCountryKey(country ? normalizeCountryName(country) : null)}
+          hoveredCountryKey={hoveredCountryKey}
+          onCountryHover={setHoveredCountryKey}
         />
 
         <OrbitControls
