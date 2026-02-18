@@ -121,6 +121,7 @@ function LedNodes({
         const glowColor = point.isActive ? '#c9a84c' : '#4db89e'
         const ringColor = point.isActive ? '#c9a84c' : '#53bfa5'
         const nodeColor = point.isActive ? '#ffe2a0' : '#99f2d5'
+        const hoverKey = normalizeCountryName(point.country)
 
         return (
           <group key={point.country}>
@@ -161,11 +162,11 @@ function LedNodes({
                 </mesh>
 
                 <mesh
-                  position={[0, 0, 0.005]}
+                  position={[0, 0, 0.006]}
                   onPointerDown={(event) => event.stopPropagation()}
                   onPointerOver={(event) => {
                     event.stopPropagation()
-                    onCountryHover?.(normalizeCountryName(point.country))
+                    onCountryHover?.(hoverKey)
                     document.body.style.cursor = 'pointer'
                   }}
                   onPointerOut={(event) => {
@@ -178,6 +179,11 @@ function LedNodes({
                     onCountrySelect?.(point.country)
                   }}
                 >
+                  <circleGeometry args={[point.glowRadiusWorld * 1.08, 32]} />
+                  <meshBasicMaterial transparent opacity={0} depthWrite={false} toneMapped={false} />
+                </mesh>
+
+                <mesh position={[0, 0, 0.005]}>
                   <circleGeometry args={[point.nodeRadiusWorld, 30]} />
                   <meshBasicMaterial
                     color={nodeColor}
