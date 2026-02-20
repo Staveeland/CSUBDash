@@ -1745,6 +1745,20 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     setDrawerOpen(true)
   }
 
+  const openSummaryMetricFromInsight = (key: SummaryKpiKey) => {
+    if (key === 'totalXmts' && insight?.id === 'summary-xmts') {
+      openAllOperatorsInsight()
+      return
+    }
+
+    if (key === 'totalSurfKm' && insight?.id === 'summary-surf-km') {
+      openAllContractorsInsight()
+      return
+    }
+
+    openSummaryKpiInsight(key)
+  }
+
   const buildProjectInsight = ({
     id,
     title,
@@ -1773,8 +1787,8 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       metrics: [
         { label: 'Treff', value: selectedProjects.length.toLocaleString('en-US') },
         { label: 'Andel av view', value: `${coveragePct.toFixed(1)}%` },
-        { label: 'SURF km', value: `${Math.round(surfTotal).toLocaleString('en-US')} km`, onClick: () => openSummaryKpiInsight('totalSurfKm') },
-        { label: 'XMTs', value: Math.round(xmtTotal).toLocaleString('en-US'), onClick: () => openSummaryKpiInsight('totalXmts') },
+        { label: 'SURF km', value: `${Math.round(surfTotal).toLocaleString('en-US')} km`, onClick: () => openSummaryMetricFromInsight('totalSurfKm') },
+        { label: 'XMTs', value: Math.round(xmtTotal).toLocaleString('en-US'), onClick: () => openSummaryMetricFromInsight('totalXmts') },
         ...extraMetrics,
       ],
       chartTitle,
