@@ -646,6 +646,32 @@ function getProjectDisplayName(project: Project): string {
   return project.development_project || project.asset || 'Ukjent prosjekt'
 }
 
+function toInsightChartItem(raw: unknown): InsightChartItem | null {
+  const readCandidate = (candidate: unknown): InsightChartItem | null => {
+    if (!candidate || typeof candidate !== 'object') return null
+    const record = candidate as Record<string, unknown>
+    const labelRaw = record.label ?? record.name ?? record.year ?? record.period
+    const valueRaw = record.value ?? record.count
+    if (typeof labelRaw !== 'string' && typeof labelRaw !== 'number') return null
+    const value = Number(valueRaw)
+    if (!Number.isFinite(value)) return null
+    return {
+      label: String(labelRaw),
+      value,
+    }
+  }
+
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+
+  if (Array.isArray(record.activePayload) && record.activePayload.length > 0) {
+    const first = record.activePayload[0]
+    return readCandidate((first as Record<string, unknown>)?.payload) || readCandidate(first)
+  }
+
+  return readCandidate(record.payload) || readCandidate(record)
+}
+
 function estimateProjectValue(project: Project): number {
   const surfValue = Math.max(0, project.surf_km || 0) * 1_000_000
   const xmtValue = Math.max(0, project.xmt_count || 0) * 120_000
@@ -1799,6 +1825,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           label: getProjectDisplayName(project),
           value: project.surf_km || 0,
         })),
+        onBarClick: (item) => {
+          const selected = topProjects.find((project) => normalize(getProjectDisplayName(project)) === normalize(item.label))
+          if (selected) openProjectFromInsight(selected)
+        },
         listTitle: 'Contractors med høyest SURF-volum',
         listItems: topContractors.map((item) => ({
           label: item.label,
@@ -1838,6 +1868,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           label: getProjectDisplayName(project),
           value: project.xmt_count || 0,
         })),
+        onBarClick: (item) => {
+          const selected = topProjects.find((project) => normalize(getProjectDisplayName(project)) === normalize(item.label))
+          if (selected) openProjectFromInsight(selected)
+        },
         listTitle: 'Operatører med høyest XMT-volum',
         listItems: topOperators.map((item) => ({
           label: item.label,
@@ -2484,8 +2518,61 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'bar',
       chartFormat: 'count',
       chartData: reportTimelineData,
+      onBarClick: (item) => {
+        const selectedYear = Number(item.label)
+        if (Number.isFinite(selectedYear)) openReportYearInsight(selectedYear)
+      },
       listTitle: 'Siste rapporter',
       listItems: source.slice(0, 12).map((item) => ({
+        label: item.displayPeriod,
+        value: formatReportDate(item.report.created_at),
+        detail: item.report.download_url ? 'PDF tilgjengelig' : 'Ingen PDF-link',
+      })),
+    })
+  }
+
+  const openReportYearInsight = (year: number) => {
+    const reportsForYear = reportInsights
+      .filter((item) => {
+        const createdAt = new Date(item.report.created_at)
+        if (Number.isNaN(createdAt.getTime())) return false
+        return createdAt.getFullYear() === year
+      })
+      .sort((a, b) => new Date(b.report.created_at).getTime() - new Date(a.report.created_at).getTime())
+
+    if (!reportsForYear.length) return
+
+    const monthCounts = new Map<number, number>()
+    reportsForYear.forEach((item) => {
+      const createdAt = new Date(item.report.created_at)
+      if (Number.isNaN(createdAt.getTime())) return
+      const month = createdAt.getMonth()
+      monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1)
+    })
+
+    const monthSeries = Array.from(monthCounts.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([month, count]) => ({
+        label: new Date(year, month, 1).toLocaleString('nb-NO', { month: 'short' }),
+        value: count,
+      }))
+
+    openInsightPanel({
+      id: `report-year-${year}`,
+      title: `Rapporter i ${year}`,
+      subtitle: `${reportsForYear.length.toLocaleString('en-US')} rapporter`,
+      source: 'reports',
+      metrics: [
+        { label: 'Rapporter i år', value: reportsForYear.length.toLocaleString('en-US') },
+        { label: 'Med sammendrag', value: reportsForYear.filter((item) => Boolean(item.report.ai_summary?.trim())).length.toLocaleString('en-US') },
+        { label: 'Med PDF-link', value: reportsForYear.filter((item) => Boolean(item.report.download_url)).length.toLocaleString('en-US') },
+      ],
+      chartTitle: 'Rapporter per måned',
+      chartKind: 'area',
+      chartFormat: 'count',
+      chartData: monthSeries,
+      listTitle: 'Rapporter',
+      listItems: reportsForYear.slice(0, 12).map((item) => ({
         label: item.displayPeriod,
         value: formatReportDate(item.report.created_at),
         detail: item.report.download_url ? 'PDF tilgjengelig' : 'Ingen PDF-link',
@@ -3288,6 +3375,23 @@ function InsightDrawer({
   const chartData = insight.chartData ?? []
   const projectRows = insight.projects?.slice(0, 12) ?? []
   const sourceLabel = insight.source === 'projects' ? 'Project Data' : insight.source === 'market' ? 'Market Data' : 'Reports'
+  const projectByChartLabel = new Map<string, Project>()
+  insight.projects?.forEach((project) => {
+    const key = normalize(getProjectDisplayName(project))
+    if (!projectByChartLabel.has(key)) projectByChartLabel.set(key, project)
+  })
+  const hasProjectChartDrill = chartData.some((item) => projectByChartLabel.has(normalize(item.label)))
+  const isChartClickable = Boolean(insight.onBarClick) || hasProjectChartDrill
+  const handleInsightChartClick = (raw: unknown) => {
+    const item = toInsightChartItem(raw)
+    if (!item) return
+    if (insight.onBarClick) {
+      insight.onBarClick(item)
+      return
+    }
+    const matchedProject = projectByChartLabel.get(normalize(item.label))
+    if (matchedProject) onSelectProject(matchedProject)
+  }
 
   return (
     <>
@@ -3368,11 +3472,8 @@ function InsightDrawer({
                           stroke="#4db89e"
                           fill={`url(#${gradientId})`}
                           strokeWidth={2}
-                          className={insight.onBarClick ? 'cursor-pointer' : ''}
-                          onClick={insight.onBarClick ? (raw: unknown) => {
-                            const data = raw as InsightChartItem | undefined
-                            if (data) insight.onBarClick?.(data)
-                          } : undefined}
+                          className={isChartClickable ? 'cursor-pointer' : ''}
+                          onClick={isChartClickable ? handleInsightChartClick : undefined}
                         />
                       </AreaChart>
                     ) : (
@@ -3385,11 +3486,8 @@ function InsightDrawer({
                           dataKey="value"
                           fill="#4db89e"
                           radius={[4, 4, 0, 0]}
-                          className={insight.onBarClick ? 'cursor-pointer' : ''}
-                          onClick={insight.onBarClick ? (raw: unknown) => {
-                            const data = raw as InsightChartItem | undefined
-                            if (data) insight.onBarClick?.(data)
-                          } : undefined}
+                          className={isChartClickable ? 'cursor-pointer' : ''}
+                          onClick={isChartClickable ? handleInsightChartClick : undefined}
                         />
                       </BarChart>
                     )}
