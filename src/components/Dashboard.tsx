@@ -101,6 +101,10 @@ interface CompetitorEvent {
   is_upcoming: boolean
 }
 
+interface CompetitorEventsMeta {
+  last_scraped_at: string | null
+}
+
 type RegionFilter = 'All' | 'NorthSea' | 'GoM'
 type DashboardView = 'historical' | 'future'
 
@@ -202,6 +206,7 @@ const DONUT_COLORS = ['#4db89e', '#38917f', '#2d7368', '#c9a84c', '#7dd4bf', '#2
 const REGION_COLORS = ['#5f87a8', '#7ea18b', '#b08f68', '#827fba', '#9f768f', '#6b9f9c']
 const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3c34']
 const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
+const FUTURE_ACTIVITY_LIMIT = 20
 const DEFAULT_TABLE_ROWS = 15
 const TABLE_COLUMNS: { key: TableSortKey; label: string; align?: 'left' | 'right'; width: string }[] = [
   { key: 'project', label: 'Prosjekt', width: '23%' },
@@ -843,6 +848,18 @@ function formatReportDate(dateValue: string): string {
   return parsed.toLocaleDateString('nb-NO')
 }
 
+function formatReportDateTime(dateValue: string): string {
+  const parsed = new Date(dateValue)
+  if (Number.isNaN(parsed.getTime())) return 'Ukjent dato'
+  return parsed.toLocaleString('nb-NO', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function formatRelativeTime(dateValue: string | null): string {
   if (!dateValue) return 'Nylig'
   const parsed = new Date(dateValue)
@@ -910,6 +927,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [reports, setReports] = useState<ReportRecord[]>([])
   const [marketLoading, setMarketLoading] = useState(true)
   const [competitorEvents, setCompetitorEvents] = useState<CompetitorEvent[]>([])
+  const [competitorMeta, setCompetitorMeta] = useState<CompetitorEventsMeta>({ last_scraped_at: null })
   const [competitorLoading, setCompetitorLoading] = useState(true)
   const [expandedReport, setExpandedReport] = useState<string | null>(null)
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
@@ -1059,6 +1077,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       if (!res.ok) throw new Error(`Competitor events API returned ${res.status}`)
       const data = await res.json()
       const rows: unknown[] = Array.isArray(data?.events) ? data.events as unknown[] : []
+      const meta = data && typeof data === 'object' ? (data as Record<string, unknown>).meta : null
 
       const normalized: CompetitorEvent[] = rows
         .map((row: unknown): CompetitorEvent => {
@@ -1085,9 +1104,16 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         .filter((event) => event.id.length > 0 && event.title.length > 0 && event.competitor_name.length > 0)
 
       setCompetitorEvents(normalized)
+      setCompetitorMeta({
+        last_scraped_at:
+          meta && typeof meta === 'object' && typeof (meta as Record<string, unknown>).last_scraped_at === 'string'
+            ? (meta as Record<string, unknown>).last_scraped_at as string
+            : null,
+      })
     } catch (error) {
       console.error('Failed to load competitor events:', error)
       setCompetitorEvents([])
+      setCompetitorMeta({ last_scraped_at: null })
     } finally {
       setCompetitorLoading(false)
     }
@@ -1517,7 +1543,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
   const activityFeed = useMemo<ActivityItem[]>(() => {
     if (view === 'future') {
-      return competitorEvents.slice(0, 5).map((event) => {
+      return competitorEvents.slice(0, FUTURE_ACTIVITY_LIMIT).map((event) => {
         const dateLabel = event.event_date ? `Forventet ${formatReportDate(event.event_date)}` : formatRelativeTime(event.published_at)
         return {
           title: `${event.competitor_name}: ${event.title}`,
@@ -2626,7 +2652,11 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             )}
           </Panel>
 
-          <Panel title="Siste hendelser" className="min-h-[400px]">
+          <Panel
+            title="Siste hendelser"
+            subtitle={`Last Updated: ${competitorMeta.last_scraped_at ? formatReportDateTime(competitorMeta.last_scraped_at) : '—'}`}
+            className="min-h-[400px]"
+          >
             {!activityFeed.length ? (
               <LoadingPlaceholder text={
                 activityLoading
