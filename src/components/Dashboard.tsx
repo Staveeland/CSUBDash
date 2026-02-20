@@ -113,6 +113,7 @@ interface ActivityItem {
   title: string
   meta: string
   url?: string
+  project?: Project
 }
 
 type TableSortDirection = 'asc' | 'desc'
@@ -149,6 +150,7 @@ interface InsightMetricItem {
   label: string
   value: string
   tone?: 'up' | 'down' | 'neutral'
+  onClick?: () => void
 }
 
 interface InsightChartItem {
@@ -160,6 +162,7 @@ interface InsightListItem {
   label: string
   value: string
   detail?: string
+  onClick?: () => void
 }
 
 interface InsightState {
@@ -173,6 +176,7 @@ interface InsightState {
   chartKind?: InsightChartKind
   chartFormat?: InsightValueFormat
   chartData?: InsightChartItem[]
+  onBarClick?: (item: InsightChartItem) => void
   listTitle?: string
   listItems?: InsightListItem[]
   projects?: Project[]
@@ -188,6 +192,7 @@ interface ProjectInsightOptions {
   chartKind?: InsightChartKind
   chartFormat?: InsightValueFormat
   chartData?: InsightChartItem[]
+  onBarClick?: (item: InsightChartItem) => void
   listTitle?: string
   listItems?: InsightListItem[]
   extraMetrics?: InsightMetricItem[]
@@ -1528,6 +1533,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     return selected.map((project, index) => ({
       title: `${project.development_project || 'Ukjent prosjekt'} - ${project.country || 'Ukjent marked'}`,
       meta: `${project.operator || project.surf_contractor || 'CSUB team'} • ${timeline[index] ?? 'Nylig'}`,
+      project,
     }))
   }, [competitorEvents, filteredProjects, view])
 
@@ -1651,6 +1657,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     chartKind = 'bar',
     chartFormat = 'count',
     chartData = [],
+    onBarClick,
     listTitle,
     listItems = [],
     extraMetrics = [],
@@ -1668,14 +1675,15 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       metrics: [
         { label: 'Treff', value: selectedProjects.length.toLocaleString('en-US') },
         { label: 'Andel av view', value: `${coveragePct.toFixed(1)}%` },
-        { label: 'SURF km', value: `${Math.round(surfTotal).toLocaleString('en-US')} km` },
-        { label: 'XMTs', value: Math.round(xmtTotal).toLocaleString('en-US') },
+        { label: 'SURF km', value: `${Math.round(surfTotal).toLocaleString('en-US')} km`, onClick: () => openSummaryKpiInsight('totalSurfKm') },
+        { label: 'XMTs', value: Math.round(xmtTotal).toLocaleString('en-US'), onClick: () => openSummaryKpiInsight('totalXmts') },
         ...extraMetrics,
       ],
       chartTitle,
       chartKind,
       chartFormat,
       chartData,
+      onBarClick,
       listTitle,
       listItems,
       projects: selectedProjects,
@@ -1702,11 +1710,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         chartKind: 'area',
         chartFormat: 'count',
         chartData: viewCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+        onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
         listTitle: 'Største land',
         listItems: viewCharts.byCountry.slice(0, 10).map((item) => ({
           label: item.country,
           value: item.count.toLocaleString('en-US'),
           detail: `${((item.count / Math.max(viewProjects.length, 1)) * 100).toFixed(1)}% av view`,
+          onClick: () => openCountryInsight(item.country),
         })),
         extraMetrics: [
           { label: 'Operatører', value: uniqueOperators.toLocaleString('en-US') },
@@ -1743,6 +1753,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         listItems: topContractors.map((item) => ({
           label: item.label,
           value: `${Math.round(item.value).toLocaleString('en-US')} km`,
+          onClick: () => openContractorInsight(item.label),
         })),
         extraMetrics: [
           {
@@ -1781,6 +1792,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         listItems: topOperators.map((item) => ({
           label: item.label,
           value: Math.round(item.value).toLocaleString('en-US'),
+          onClick: () => openOperatorInsight(item.label),
         })),
       })
       return
@@ -1803,6 +1815,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         chartTitle: 'Fordeling per land',
         chartFormat: 'count',
         chartData: selectedCharts.byCountry.slice(0, 10).map((item) => ({ label: item.country, value: item.count })),
+        onBarClick: (item) => openCountryInsight(item.label),
         listTitle: 'Nærmeste prosjekter',
         listItems: [...selectedProjects]
           .sort((a, b) => (getProjectYear(a) ?? 9999) - (getProjectYear(b) ?? 9999))
@@ -1831,6 +1844,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Land med høyest aktivitet',
       chartFormat: 'count',
       chartData: viewCharts.byCountry.slice(0, 12).map((item) => ({ label: item.country, value: item.count })),
+      onBarClick: (item) => openCountryInsight(item.label),
       listTitle: 'Kontinentfordeling',
       listItems: Array.from(continentMap.entries())
         .map(([label, value]) => ({ label, value }))
@@ -1838,6 +1852,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         .map((item) => ({
           label: item.label,
           value: item.value.toLocaleString('en-US'),
+          onClick: () => openRegionalRegionInsight(item.label),
         })),
       extraMetrics: [
         { label: 'Land', value: viewCharts.byCountry.length.toLocaleString('en-US') },
@@ -1882,11 +1897,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Faser i valgt år',
       chartFormat: 'count',
       chartData: phaseBreakdown.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
+      onBarClick: (item) => openPhaseInsight(item.label),
       listTitle: 'Prosjekter med høyest estimert verdi',
       listItems: topProjects.map((project) => ({
         label: getProjectDisplayName(project),
         value: formatMillions(estimateProjectValue(project)),
         detail: `${project.country || 'Ukjent land'} • ${project.operator || project.surf_contractor || 'Ukjent aktør'}`,
+        onClick: () => openCountryInsight(project.country),
       })),
       projects: selectedProjects,
     })
@@ -1908,10 +1925,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'count',
       chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
       listTitle: 'Største markeder i fasen',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
+        onClick: () => openCountryInsight(item.country),
       })),
     })
   }
@@ -1931,10 +1950,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'count',
       chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
       listTitle: 'Største land i fasen',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
+        onClick: () => openCountryInsight(item.country),
       })),
     })
   }
@@ -1951,6 +1972,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Fasefordeling',
       chartFormat: 'count',
       chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
+      onBarClick: (item) => openPhaseInsight(item.label),
       listTitle: 'Viktigste operatører',
       listItems: aggregateProjectMetric(
         selectedProjects,
@@ -1961,6 +1983,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         .map((item) => ({
           label: item.label,
           value: Math.round(item.value).toLocaleString('en-US'),
+          onClick: () => openOperatorInsight(item.label),
         })),
     })
   }
@@ -1980,10 +2003,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'count',
       chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
       listTitle: 'Største land for dybdekategorien',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
+        onClick: () => openCountryInsight(item.country),
       })),
     })
   }
@@ -2003,10 +2028,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'count',
       chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
       listTitle: 'Land der contractor er aktiv',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
+        onClick: () => openCountryInsight(item.country),
       })),
       extraMetrics: [
         {
@@ -2029,6 +2056,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Fasefordeling',
       chartFormat: 'count',
       chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
+      onBarClick: (item) => openPhaseInsight(item.label),
       listTitle: 'Contractors i operatørporteføljen',
       listItems: aggregateProjectMetric(
         selectedProjects,
@@ -2039,6 +2067,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         .map((item) => ({
           label: item.label,
           value: Math.round(item.value).toLocaleString('en-US'),
+          onClick: () => openContractorInsight(item.label),
         })),
     })
   }
@@ -2071,12 +2100,72 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Fasefordeling',
       chartFormat: 'count',
       chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
+      onBarClick: (item) => openPhaseInsight(item.label),
       listTitle: 'Største land',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
+        onClick: () => openCountryInsight(item.country),
       })),
       projects: selectedProjects,
+    })
+  }
+
+  const openAllContractorsInsight = () => {
+    const allContractors = viewCompanies.contractors
+    const totalProjects = allContractors.reduce((sum, c) => sum + c.count, 0)
+    openInsightPanel({
+      id: 'all-contractors',
+      title: 'Alle installasjonsselskaper',
+      subtitle: `${allContractors.length} selskaper • ${totalProjects.toLocaleString('en-US')} prosjekter`,
+      source: 'projects',
+      metrics: [
+        { label: 'Totalt selskaper', value: allContractors.length.toLocaleString('en-US') },
+        { label: 'Totalt prosjekter', value: totalProjects.toLocaleString('en-US') },
+        { label: 'Topp contractor', value: allContractors[0]?.name ?? '—' },
+        { label: 'Topp prosjekter', value: (allContractors[0]?.count ?? 0).toLocaleString('en-US') },
+      ],
+      chartTitle: 'Prosjekter per contractor',
+      chartKind: 'bar',
+      chartFormat: 'count',
+      chartData: allContractors.slice(0, 20).map((c) => ({ label: c.name, value: c.count })),
+      onBarClick: (item) => openContractorInsight(item.label),
+      listTitle: 'Komplett liste',
+      listItems: allContractors.map((c) => ({
+        label: c.name,
+        value: c.count.toLocaleString('en-US'),
+        onClick: () => openContractorInsight(c.name),
+      })),
+      projects: viewProjects,
+    })
+  }
+
+  const openAllOperatorsInsight = () => {
+    const allOperators = viewCompanies.operators
+    const totalProjects = allOperators.reduce((sum, o) => sum + o.count, 0)
+    openInsightPanel({
+      id: 'all-operators',
+      title: 'Alle operatører',
+      subtitle: `${allOperators.length} operatører • ${totalProjects.toLocaleString('en-US')} prosjekter`,
+      source: 'projects',
+      metrics: [
+        { label: 'Totalt operatører', value: allOperators.length.toLocaleString('en-US') },
+        { label: 'Totalt prosjekter', value: totalProjects.toLocaleString('en-US') },
+        { label: 'Topp operatør', value: allOperators[0]?.name ?? '—' },
+        { label: 'Topp prosjekter', value: (allOperators[0]?.count ?? 0).toLocaleString('en-US') },
+      ],
+      chartTitle: 'Prosjekter per operatør',
+      chartKind: 'bar',
+      chartFormat: 'count',
+      chartData: allOperators.slice(0, 20).map((o) => ({ label: o.name, value: o.count })),
+      onBarClick: (item) => openOperatorInsight(item.label),
+      listTitle: 'Komplett liste',
+      listItems: allOperators.map((o) => ({
+        label: o.name,
+        value: o.count.toLocaleString('en-US'),
+        onClick: () => openOperatorInsight(o.name),
+      })),
+      projects: viewProjects,
     })
   }
 
@@ -2123,6 +2212,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         label: String(item.year),
         value: item.value,
       })),
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openSpendingYearInsight(y) },
       listTitle: 'Siste datapunkter',
       listItems: [...metricConfig.series]
         .slice(-8)
@@ -2130,6 +2220,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         .map((item) => ({
           label: String(item.year),
           value: formatMetricValue(item.value),
+          onClick: () => openSpendingYearInsight(item.year),
         })),
       projects: linkedProjects,
     })
@@ -2169,10 +2260,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'bar',
       chartFormat: 'currencyBillions',
       chartData: regionalBreakdown.map((item) => ({ label: item.label, value: item.value })),
+      onBarClick: (item) => openRegionalRegionInsight(item.label),
       listTitle: 'Regionandel',
       listItems: regionalBreakdown.map((item) => ({
         label: item.label,
         value: formatBillions(item.value),
+        onClick: () => openRegionalRegionInsight(item.label),
       })),
       projects: linkedProjects,
     })
@@ -2207,10 +2300,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         label: item.label,
         value: item.value,
       })),
+      onBarClick: (item) => openOperatorInsight(item.label),
       listTitle: 'Topp operatører',
       listItems: operatorBreakdown.map((item) => ({
         label: item.label,
         value: Math.round(item.value).toLocaleString('en-US'),
+        onClick: () => openOperatorInsight(item.label),
       })),
       projects: linkedProjects,
     })
@@ -2242,11 +2337,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'bar',
       chartFormat: 'currencyBillions',
       chartData: breakdown.map((item) => ({ label: item.label, value: item.value })),
+      onBarClick: (item) => openRegionalRegionInsight(item.label),
       listTitle: 'Andel per region',
       listItems: breakdown.map((item) => ({
         label: item.label,
         value: formatBillions(item.value),
         detail: total > 0 ? `${((item.value / total) * 100).toFixed(1)}% av total` : undefined,
+        onClick: () => openRegionalRegionInsight(item.label),
       })),
     })
   }
@@ -2289,6 +2386,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'currencyBillions',
       chartData: timeline,
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openSpendingYearInsight(y) },
       listTitle: 'Siste år',
       listItems: [...timeline]
         .reverse()
@@ -2296,6 +2394,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         .map((item) => ({
           label: item.label,
           value: formatBillions(item.value),
+          onClick: () => { const y = Number(item.label); if (Number.isFinite(y)) openSpendingYearInsight(y) },
         })),
       projects: linkedProjects,
     })
@@ -2553,6 +2652,19 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                         <p className="text-xs text-[var(--csub-light)] font-mono mt-1">{item.meta}</p>
                       </div>
                     </a>
+                  ) : item.project ? (
+                    <button
+                      key={`${item.title}-${item.meta}`}
+                      type="button"
+                      onClick={() => openDrawer(item.project!)}
+                      className="group flex items-start gap-3 rounded-md pb-4 border-b border-[var(--csub-light-faint)] last:border-b-0 hover:bg-[color:rgba(77,184,158,0.08)] transition-colors cursor-pointer text-left w-full"
+                    >
+                      <div className="w-2.5 h-2.5 mt-1.5 rounded-full bg-[var(--csub-gold)] shrink-0 shadow-[0_0_8px_var(--csub-gold)]" />
+                      <div>
+                        <p className="text-sm text-gray-100 group-hover:text-white">{item.title}</p>
+                        <p className="text-xs text-[var(--csub-light)] font-mono mt-1">{item.meta}</p>
+                      </div>
+                    </button>
                   ) : (
                     <div key={`${item.title}-${item.meta}`} className="flex items-start gap-3 pb-4 border-b border-[var(--csub-light-faint)] last:border-b-0">
                       <div className="w-2.5 h-2.5 mt-1.5 rounded-full bg-[var(--csub-gold)] shrink-0 shadow-[0_0_8px_var(--csub-gold)]" />
@@ -2711,25 +2823,36 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             {!viewCompanies.contractors.length ? (
               <LoadingPlaceholder />
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                {viewCompanies.contractors.slice(0, 8).map((contractor) => {
-                  const maxCount = Math.max(...viewCompanies.contractors.map((company) => company.count), 1)
-                  return (
-                    <button
-                      key={contractor.name}
-                      type="button"
-                      onClick={() => openContractorInsight(contractor.name)}
-                      className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4 text-left ${clickableCardClass}`}
-                    >
-                      <p className="text-sm text-white truncate">{contractor.name}</p>
-                      <p className="font-mono text-xl text-[var(--csub-light)] mt-1">{contractor.count.toLocaleString('en-US')}</p>
-                      <div className="w-full h-1.5 mt-2 rounded bg-[color:rgba(77,184,158,0.14)]">
-                        <div className="h-full rounded bg-gradient-to-r from-[var(--csub-light)] to-[var(--csub-gold)]" style={{ width: `${Math.round((contractor.count / maxCount) * 100)}%` }} />
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                  {viewCompanies.contractors.slice(0, 8).map((contractor) => {
+                    const maxCount = Math.max(...viewCompanies.contractors.map((company) => company.count), 1)
+                    return (
+                      <button
+                        key={contractor.name}
+                        type="button"
+                        onClick={() => openContractorInsight(contractor.name)}
+                        className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.55)] p-4 text-left ${clickableCardClass}`}
+                      >
+                        <p className="text-sm text-white truncate">{contractor.name}</p>
+                        <p className="font-mono text-xl text-[var(--csub-light)] mt-1">{contractor.count.toLocaleString('en-US')}</p>
+                        <div className="w-full h-1.5 mt-2 rounded bg-[color:rgba(77,184,158,0.14)]">
+                          <div className="h-full rounded bg-gradient-to-r from-[var(--csub-light)] to-[var(--csub-gold)]" style={{ width: `${Math.round((contractor.count / maxCount) * 100)}%` }} />
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                {viewCompanies.contractors.length > 8 && (
+                  <button
+                    type="button"
+                    onClick={openAllContractorsInsight}
+                    className="w-full mt-3 rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-4 py-2.5 text-sm text-[var(--csub-light)] hover:text-white hover:border-[var(--csub-gold-soft)] transition-colors cursor-pointer"
+                  >
+                    Vis alle ({viewCompanies.contractors.length})
+                  </button>
+                )}
+              </>
             )}
           </Panel>
 
@@ -2737,19 +2860,30 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             {!viewCompanies.operators.length ? (
               <LoadingPlaceholder />
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {viewCompanies.operators.slice(0, 10).map((operator) => (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {viewCompanies.operators.slice(0, 10).map((operator) => (
+                    <button
+                      key={operator.name}
+                      type="button"
+                      onClick={() => openOperatorInsight(operator.name)}
+                      className={`flex justify-between items-center rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3 text-left ${clickableCardClass}`}
+                    >
+                      <span className="text-sm text-[var(--text-muted)] truncate pr-3">{operator.name}</span>
+                      <span className="font-mono text-sm text-white">{operator.count.toLocaleString('en-US')}</span>
+                    </button>
+                  ))}
+                </div>
+                {viewCompanies.operators.length > 10 && (
                   <button
-                    key={operator.name}
                     type="button"
-                    onClick={() => openOperatorInsight(operator.name)}
-                    className={`flex justify-between items-center rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] p-3 text-left ${clickableCardClass}`}
+                    onClick={openAllOperatorsInsight}
+                    className="w-full mt-3 rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-4 py-2.5 text-sm text-[var(--csub-light)] hover:text-white hover:border-[var(--csub-gold-soft)] transition-colors cursor-pointer"
                   >
-                    <span className="text-sm text-[var(--text-muted)] truncate pr-3">{operator.name}</span>
-                    <span className="font-mono text-sm text-white">{operator.count.toLocaleString('en-US')}</span>
+                    Vis alle ({viewCompanies.operators.length})
                   </button>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </Panel>
         </section>
@@ -2757,9 +2891,20 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         <section className="bg-[var(--csub-dark)] rounded-xl border border-[var(--csub-light-soft)] overflow-hidden mt-6 shadow-lg">
           <div className="px-6 py-5 border-b border-[var(--csub-light-faint)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <h2 className="text-lg text-white">{view === 'historical' ? 'Historisk kontraktoversikt' : 'Kommende prosjektoversikt'}</h2>
-            <p className="text-xs text-[var(--text-muted)]">
-              Viser {visibleProjects.length.toLocaleString('en-US')} av {sortedProjects.length.toLocaleString('en-US')}
-            </p>
+            {sortedProjects.length > DEFAULT_TABLE_ROWS ? (
+              <button
+                type="button"
+                onClick={() => setShowAllTableRows((current) => !current)}
+                className="text-xs text-[var(--csub-light)] hover:text-white transition-colors cursor-pointer"
+              >
+                Viser {visibleProjects.length.toLocaleString('en-US')} av {sortedProjects.length.toLocaleString('en-US')}
+                {!showAllTableRows && ' — vis alle'}
+              </button>
+            ) : (
+              <p className="text-xs text-[var(--text-muted)]">
+                Viser {visibleProjects.length.toLocaleString('en-US')} av {sortedProjects.length.toLocaleString('en-US')}
+              </p>
+            )}
           </div>
           <div className="overflow-x-auto w-full">
             <table className="w-full min-w-[980px] table-fixed text-left text-sm whitespace-nowrap">
@@ -3125,8 +3270,14 @@ function InsightDrawer({
             {insight.metrics.length > 0 && (
               <section>
                 <div className="grid grid-cols-2 gap-2">
-                  {insight.metrics.map((metric, index) => (
-                    <div key={`${insight.id}-metric-${index}`} className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.5)] px-3 py-2">
+                  {insight.metrics.map((metric, index) => {
+                    const MetricTag = metric.onClick ? 'button' : 'div'
+                    return (
+                    <MetricTag
+                      key={`${insight.id}-metric-${index}`}
+                      {...(metric.onClick ? { type: 'button' as const, onClick: metric.onClick } : {})}
+                      className={`rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.5)] px-3 py-2 text-left ${metric.onClick ? 'cursor-pointer hover:border-[var(--csub-gold-soft)] hover:bg-[color:rgba(77,184,158,0.08)] transition-colors' : ''}`}
+                    >
                       <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">{metric.label}</p>
                       <p className={`font-mono text-sm mt-1 ${
                         metric.tone === 'up'
@@ -3137,8 +3288,10 @@ function InsightDrawer({
                       }`}>
                         {metric.value}
                       </p>
-                    </div>
-                  ))}
+                      {metric.onClick && <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--csub-light)] mt-1 block opacity-60">Klikk for detaljer</span>}
+                    </MetricTag>
+                    )
+                  })}
                 </div>
               </section>
             )}
@@ -3160,7 +3313,18 @@ function InsightDrawer({
                         <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
                         <Tooltip content={<InsightTooltip format={chartFormat} />} cursor={{ stroke: '#4db89e', strokeOpacity: 0.2 }} />
-                        <Area type="monotone" dataKey="value" stroke="#4db89e" fill={`url(#${gradientId})`} strokeWidth={2} />
+                        <Area
+                          type="monotone"
+                          dataKey="value"
+                          stroke="#4db89e"
+                          fill={`url(#${gradientId})`}
+                          strokeWidth={2}
+                          className={insight.onBarClick ? 'cursor-pointer' : ''}
+                          onClick={insight.onBarClick ? (raw: unknown) => {
+                            const data = raw as InsightChartItem | undefined
+                            if (data) insight.onBarClick?.(data)
+                          } : undefined}
+                        />
                       </AreaChart>
                     ) : (
                       <BarChart data={chartData}>
@@ -3168,7 +3332,16 @@ function InsightDrawer({
                         <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} angle={-20} textAnchor="end" height={58} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 11, fill: '#8ca8a0' }} />
                         <Tooltip content={<InsightTooltip format={chartFormat} />} cursor={{ fill: 'rgba(77,184,158,0.05)' }} />
-                        <Bar dataKey="value" fill="#4db89e" radius={[4, 4, 0, 0]} />
+                        <Bar
+                          dataKey="value"
+                          fill="#4db89e"
+                          radius={[4, 4, 0, 0]}
+                          className={insight.onBarClick ? 'cursor-pointer' : ''}
+                          onClick={insight.onBarClick ? (raw: unknown) => {
+                            const data = raw as InsightChartItem | undefined
+                            if (data) insight.onBarClick?.(data)
+                          } : undefined}
+                        />
                       </BarChart>
                     )}
                   </ResponsiveContainer>
@@ -3180,15 +3353,22 @@ function InsightDrawer({
               <section>
                 <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)] mb-2">{insight.listTitle}</p>
                 <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] divide-y divide-[var(--csub-light-faint)]">
-                  {insight.listItems?.map((item, index) => (
-                    <div key={`${insight.id}-list-${index}`} className="px-3 py-2">
+                  {insight.listItems?.map((item, index) => {
+                    const ListTag = item.onClick ? 'button' : 'div'
+                    return (
+                    <ListTag
+                      key={`${insight.id}-list-${index}`}
+                      {...(item.onClick ? { type: 'button' as const, onClick: item.onClick } : {})}
+                      className={`px-3 py-2 w-full text-left ${item.onClick ? 'cursor-pointer hover:bg-[color:rgba(77,184,158,0.08)] transition-colors' : ''}`}
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm text-white truncate">{item.label}</span>
                         <span className="font-mono text-sm text-[var(--csub-light)] shrink-0">{item.value}</span>
                       </div>
                       {item.detail && <p className="text-xs text-[var(--text-muted)] mt-1">{item.detail}</p>}
-                    </div>
-                  ))}
+                    </ListTag>
+                    )
+                  })}
                 </div>
               </section>
             )}
