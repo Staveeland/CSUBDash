@@ -47,6 +47,11 @@ const COUNTRY_COORDS_BY_KEY = new Map<string, [number, number]>(
   Object.entries(COUNTRY_COORDS).map(([country, coords]) => [normalizeCountryName(country), coords]),
 )
 
+const RAL1004_PRIMARY = '#e4a010'
+const RAL1004_MEDIUM = '#d79918'
+const RAL1004_LIGHT = '#ffd57a'
+const RAL1004_NODE_ACTIVE = '#ffe8b3'
+
 function latLonToVector3(lat: number, lon: number, radius: number): [number, number, number] {
   const phi = (90 - lat) * (Math.PI / 180)
   const theta = (lon + 180) * (Math.PI / 180)
@@ -146,10 +151,10 @@ function LedNodes({
       {points.map((point) => {
         const isHovered = hoveredCountryKey === normalizeCountryName(point.country)
         const isActive = point.isActive || isHovered
-        const stemColor = point.isActive ? '#c9a84c' : '#4db89e'
-        const glowColor = point.isActive ? '#c9a84c' : '#4db89e'
-        const ringColor = point.isActive ? '#c9a84c' : '#53bfa5'
-        const nodeColor = point.isActive ? '#ffe2a0' : '#99f2d5'
+        const stemColor = point.isActive ? RAL1004_PRIMARY : RAL1004_MEDIUM
+        const glowColor = point.isActive ? RAL1004_PRIMARY : RAL1004_MEDIUM
+        const ringColor = point.isActive ? RAL1004_LIGHT : RAL1004_PRIMARY
+        const nodeColor = point.isActive ? RAL1004_NODE_ACTIVE : RAL1004_LIGHT
         const hoverKey = normalizeCountryName(point.country)
 
         return (

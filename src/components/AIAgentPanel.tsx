@@ -251,7 +251,7 @@ export default function AIAgentPanel() {
                   <div
                     key={message.id}
                     className={`rounded-lg border px-2.5 py-2 ${message.role === 'user'
-                      ? 'border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.13)]'
+                      ? 'border-[var(--csub-gold-soft)] bg-[color:rgba(228,160,16,0.13)]'
                       : 'border-[var(--csub-light-soft)] bg-[color:rgba(77,184,158,0.09)]'}`}
                   >
                     <div className="flex items-center justify-between gap-2">

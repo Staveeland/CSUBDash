@@ -25,7 +25,7 @@ export default async function LoginPage({
     <main className="relative min-h-screen bg-[var(--bg-dark)] text-gray-100 grid place-items-center px-4 overflow-hidden">
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute -top-28 -right-20 h-80 w-80 rounded-full bg-[color:rgba(77,184,158,0.12)] blur-3xl" />
-        <div className="absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-[color:rgba(201,168,76,0.1)] blur-3xl" />
+        <div className="absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-[color:rgba(228,160,16,0.1)] blur-3xl" />
       </div>
 
       <section className="relative z-10 w-full max-w-xl rounded-2xl border border-[var(--csub-light-soft)] bg-[color:rgba(14,38,32,0.88)] p-8 md:p-10 shadow-[0_18px_70px_rgba(0,0,0,0.35)] backdrop-blur">

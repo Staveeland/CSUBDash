@@ -18,7 +18,7 @@ async function getCtor(): Promise<PDFDocumentCtor> {
 // ─── Colors ───────────────────────────────────────────────────────────────────
 const C = {
   bg: '#0B1A16', header: '#0E2620', card: '#112E26',
-  accent: '#4DB89E', gold: '#C9A84C', white: '#F0F7F4',
+  accent: '#4DB89E', gold: '#E4A010', white: '#F0F7F4',
   text: '#D5E8E2', muted: '#7FA89E', line: '#1E3F36',
   tblHead: '#1A3D34', tblOdd: '#112E26', tblEven: '#0F2822',
 }

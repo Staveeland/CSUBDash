@@ -34,7 +34,7 @@ function sanitizeFileName(name: string): string {
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    pending: 'bg-[rgba(201,168,76,0.15)] text-[#c9a84c] border border-[rgba(201,168,76,0.3)]',
+    pending: 'bg-[rgba(228,160,16,0.15)] text-[#e4a010] border border-[rgba(228,160,16,0.3)]',
     processing: 'bg-[rgba(77,184,158,0.15)] text-[#4db89e] border border-[rgba(77,184,158,0.3)]',
     completed: 'bg-[rgba(34,197,94,0.15)] text-[#22c55e] border border-[rgba(34,197,94,0.3)]',
     failed: 'bg-[rgba(239,68,68,0.15)] text-[#ef4444] border border-[rgba(239,68,68,0.3)]',

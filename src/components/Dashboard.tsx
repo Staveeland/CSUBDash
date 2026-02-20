@@ -202,7 +202,7 @@ interface ProjectInsightOptions {
   extraMetrics?: InsightMetricItem[]
 }
 
-const DONUT_COLORS = ['#4db89e', '#38917f', '#2d7368', '#c9a84c', '#7dd4bf', '#245a4e']
+const DONUT_COLORS = ['#4db89e', '#38917f', '#2d7368', '#e4a010', '#7dd4bf', '#245a4e']
 const REGION_COLORS = ['#5f87a8', '#7ea18b', '#b08f68', '#827fba', '#9f768f', '#6b9f9c']
 const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3c34']
 const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
@@ -2524,7 +2524,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
       <main className="max-w-[1600px] mx-auto p-4 md:p-8 space-y-8">
         {loadError && (
-          <section className="rounded-xl border border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.1)] px-4 py-3 text-sm text-[var(--csub-gold)] font-mono">
+          <section className="rounded-xl border border-[var(--csub-gold-soft)] bg-[color:rgba(228,160,16,0.1)] px-4 py-3 text-sm text-[var(--csub-gold)] font-mono">
             Datafeil: {loadError}
           </section>
         )}
@@ -3016,7 +3016,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             </div>
           )}
           {view === 'historical' && (
-            <div className="m-4 flex items-center gap-2 rounded-lg border border-[var(--csub-gold-soft)] bg-[color:rgba(201,168,76,0.08)] px-4 py-3 text-xs text-[var(--text-muted)]">
+            <div className="m-4 flex items-center gap-2 rounded-lg border border-[var(--csub-gold-soft)] bg-[color:rgba(228,160,16,0.08)] px-4 py-3 text-xs text-[var(--text-muted)]">
               AI-vurdering: verifiser alltid output manuelt.
             </div>
           )}
