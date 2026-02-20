@@ -1616,11 +1616,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     { key: 'totalProjects', label: 'Total poster', value: loading ? '—' : computedStats.totalProjects.toLocaleString('en-US') },
     { key: 'totalSurfKm', label: 'Total SURF km', value: loading ? '—' : `${computedStats.totalSurfKm.toLocaleString('en-US')} km` },
     { key: 'totalXmts', label: 'Total XMTs', value: loading ? '—' : computedStats.totalXmts.toLocaleString('en-US') },
-    {
-      key: 'upcomingAwards',
-      label: view === 'historical' ? 'Awards siste 12m' : 'Kommende prosjekter',
-      value: loading ? '—' : computedStats.upcomingAwards.toLocaleString('en-US'),
-    },
+    // Hidden: duplicates "Total poster" count – uncomment to restore
+    // {
+    //   key: 'upcomingAwards',
+    //   label: view === 'historical' ? 'Awards siste 12m' : 'Kommende prosjekter',
+    //   value: loading ? '—' : computedStats.upcomingAwards.toLocaleString('en-US'),
+    // },
     { key: 'regions', label: 'Regioner', value: loading ? '—' : computedStats.regionCount.toLocaleString('en-US') },
   ]
 
@@ -2466,7 +2467,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6">
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
           {summaryKpis.map((kpi) => (
             <button
               key={kpi.label}
