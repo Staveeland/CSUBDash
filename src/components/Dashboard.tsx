@@ -121,7 +121,7 @@ interface ActivityItem {
 }
 
 type TableSortDirection = 'asc' | 'desc'
-type TableSortKey = 'project' | 'country' | 'operator' | 'contractor' | 'depth' | 'xmt' | 'surf'
+type TableSortKey = 'project' | 'year' | 'country' | 'operator' | 'contractor' | 'depth' | 'xmt' | 'surf'
 
 interface TableSortConfig {
   key: TableSortKey
@@ -209,12 +209,13 @@ const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
 const FUTURE_ACTIVITY_LIMIT = 20
 const DEFAULT_TABLE_ROWS = 15
 const TABLE_COLUMNS: { key: TableSortKey; label: string; align?: 'left' | 'right'; width: string }[] = [
-  { key: 'project', label: 'Prosjekt', width: '23%' },
-  { key: 'country', label: 'Land', width: '12%' },
-  { key: 'operator', label: 'Operatør', width: '16%' },
-  { key: 'contractor', label: 'SURF Contractor', width: '16%' },
-  { key: 'depth', label: 'Vanndybde', width: '14%' },
-  { key: 'xmt', label: 'XMTs', align: 'right', width: '9%' },
+  { key: 'project', label: 'Prosjekt', width: '20%' },
+  { key: 'year', label: 'År', width: '9%' },
+  { key: 'country', label: 'Land', width: '11%' },
+  { key: 'operator', label: 'Operatør', width: '14%' },
+  { key: 'contractor', label: 'SURF Contractor', width: '14%' },
+  { key: 'depth', label: 'Vanndybde', width: '12%' },
+  { key: 'xmt', label: 'XMTs', align: 'right', width: '10%' },
   { key: 'surf', label: 'SURF km', align: 'right', width: '10%' },
 ]
 
@@ -452,6 +453,18 @@ function getProjectYear(project: Project): number | null {
   return null
 }
 
+function getProjectYearLabel(project: Project): string {
+  const first = parseYearValue(project.first_year)
+  const last = parseYearValue(project.last_year)
+
+  if (first && last) return first === last ? String(first) : `${first}-${last}`
+  if (first) return String(first)
+  if (last) return String(last)
+
+  const fallback = getProjectYear(project)
+  return fallback ? String(fallback) : '—'
+}
+
 function getProjectDataSource(project: Project): string {
   return typeof project.data_source === 'string' ? normalize(project.data_source) : ''
 }
@@ -474,6 +487,10 @@ function getTableSortValue(project: Project, key: TableSortKey): string | number
   switch (key) {
     case 'project':
       return normalize(project.development_project || project.asset || '')
+    case 'year': {
+      const year = getProjectYear(project)
+      return year === null ? Number.NaN : year
+    }
     case 'country':
       return normalize(project.country)
     case 'operator':
@@ -496,6 +513,13 @@ function compareProjectsForSort(a: Project, b: Project, sort: TableSortConfig): 
   const right = getTableSortValue(b, sort.key)
 
   if (typeof left === 'number' && typeof right === 'number') {
+    const leftMissing = Number.isNaN(left)
+    const rightMissing = Number.isNaN(right)
+    if (leftMissing || rightMissing) {
+      if (leftMissing && rightMissing) return 0
+      return leftMissing ? 1 : -1
+    }
+
     const base = left - right
     if (base === 0) return 0
     return sort.direction === 'asc' ? base : -base
@@ -2966,13 +2990,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={TABLE_COLUMNS.length}>
                       <LoadingPlaceholder />
                     </td>
                   </tr>
                 ) : sortedProjects.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                    <td colSpan={TABLE_COLUMNS.length} className="px-4 py-6 text-center text-[var(--text-muted)]">
                       Ingen data for valgt filter
                     </td>
                   </tr>
@@ -2991,6 +3015,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                         className={`cursor-pointer transition-colors border-b border-[var(--csub-light-faint)] ${isHighlighted ? 'bg-[color:rgba(77,184,158,0.16)]' : 'hover:bg-[color:rgba(77,184,158,0.08)]'}`}
                       >
                         <td className="px-4 py-3 font-semibold text-white max-w-0 truncate">{project.development_project || '—'}</td>
+                        <td className="px-4 py-3 font-mono text-[var(--text-muted)] max-w-0 truncate">{getProjectYearLabel(project)}</td>
                         <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.country || '—'}</td>
                         <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.operator || '—'}</td>
                         <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.surf_contractor || '—'}</td>
