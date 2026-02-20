@@ -1619,10 +1619,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   }, [reports])
 
   const summaryKpis: Array<{ key: SummaryKpiKey; label: string; value: string }> = [
-    { key: 'totalProjects', label: 'Total poster', value: loading ? '—' : computedStats.totalProjects.toLocaleString('en-US') },
+    { key: 'totalProjects', label: 'Totalt Antall Kontrakter', value: loading ? '—' : computedStats.totalProjects.toLocaleString('en-US') },
     { key: 'totalSurfKm', label: 'Total SURF km', value: loading ? '—' : `${computedStats.totalSurfKm.toLocaleString('en-US')} km` },
     { key: 'totalXmts', label: 'Total XMTs', value: loading ? '—' : computedStats.totalXmts.toLocaleString('en-US') },
-    // Hidden: duplicates "Total poster" count – uncomment to restore
+    // Hidden: duplicates "Totalt Antall Kontrakter" count – uncomment to restore
     // {
     //   key: 'upcomingAwards',
     //   label: view === 'historical' ? 'Awards siste 12m' : 'Kommende prosjekter',
@@ -1702,8 +1702,8 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       const uniqueContractors = new Set(viewProjects.map((project) => normalize(project.surf_contractor)).filter(Boolean)).size
       buildProjectInsight({
         id: 'summary-total-projects',
-        title: 'Total poster',
-        subtitle: `${computedStats.totalProjects.toLocaleString('en-US')} aktive poster`,
+        title: 'Totalt Antall Kontrakter',
+        subtitle: `${computedStats.totalProjects.toLocaleString('en-US')} aktive kontrakter`,
         description: 'Prosjektlisten under viser alle treff i valgt view og region.',
         selectedProjects: viewProjects,
         chartTitle: 'Prosjekter per år',
@@ -2626,7 +2626,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             )}
           </Panel>
 
-          <Panel title="Siste hendelser">
+          <Panel title="Siste hendelser" className="min-h-[400px]">
             {!activityFeed.length ? (
               <LoadingPlaceholder text={
                 activityLoading
@@ -2636,7 +2636,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                     : 'Ingen hendelser for valgt filter'
               } />
             ) : (
-              <div className="flex flex-col gap-4">
+              <div className="flex h-[320px] flex-col gap-4 overflow-y-auto pr-2">
                 {activityFeed.map((item) => (
                   item.url ? (
                     <a
@@ -2779,37 +2779,31 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             )}
           </Panel>
 
-          <Panel title="Kontrakttrend">
-            {!viewCharts.byYear.length ? (
+          <Panel title="Contries">
+            {!viewCharts.byCountry.length ? (
               <LoadingPlaceholder />
             ) : (
-              <div className="h-[260px]">
-                <ResponsiveContainer>
-                  <AreaChart data={viewCharts.byYear}>
-                    <defs>
-                      <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#4db89e" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="#4db89e" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#4db89e" strokeOpacity={0.12} />
-                    <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontFamily: 'var(--font-mono)', fontSize: 12, fill: '#8ca8a0' }} />
-                    <Tooltip content={<CompactTooltip />} cursor={{ stroke: '#4db89e', strokeOpacity: 0.2 }} />
-                    <Area
-                      type="monotone"
-                      dataKey="count"
-                      stroke="#4db89e"
-                      fill="url(#trendGradient)"
-                      strokeWidth={2}
-                      className="cursor-pointer"
-                      onClick={(raw: unknown) => {
-                        const data = raw as { year?: number }
-                        if (typeof data.year === 'number') openYearInsight(data.year)
-                      }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div className="h-[260px] overflow-y-auto pr-2">
+                <div className="flex flex-col gap-2">
+                  {viewCharts.byCountry.map((item, index) => {
+                    const share = viewProjects.length ? (item.count / viewProjects.length) * 100 : 0
+                    return (
+                      <button
+                        key={item.country}
+                        type="button"
+                        onClick={() => openCountryInsight(item.country)}
+                        className="flex items-center gap-3 rounded-md border border-transparent px-2 py-2 text-left hover:border-[var(--csub-light-soft)] hover:bg-[color:rgba(77,184,158,0.08)] transition-colors cursor-pointer"
+                      >
+                        <span className="w-7 shrink-0 font-mono text-[10px] text-[var(--text-muted)]">{String(index + 1).padStart(2, '0')}</span>
+                        <span className="truncate text-sm text-white">{item.country}</span>
+                        <span className="ml-auto text-right">
+                          <span className="block font-mono text-sm text-white">{item.count.toLocaleString('en-US')}</span>
+                          <span className="block text-[10px] text-[var(--text-muted)]">{share.toFixed(1)}%</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </Panel>
