@@ -267,9 +267,129 @@ const BRENT_METRIC_ALIASES = [
   'brent_usd_per_bbl',
   'brent_price_usd',
 ]
+const CONTINENT_LABEL_MAP: Record<string, string> = {
+  africa: 'Africa',
+  antarctica: 'Antarctica',
+  asia: 'Asia',
+  europe: 'Europe',
+  'north america': 'North America',
+  'south america': 'South America',
+  oceania: 'Oceania',
+}
+const CONTINENT_ALIAS_MAP: Record<string, string> = {
+  'asia australia': 'Asia',
+  'asia pacific': 'Asia',
+  apac: 'Asia',
+  'middle east': 'Asia',
+  'middle east russia': 'Asia',
+  'north sea': 'Europe',
+  'west africa': 'Africa',
+  'gulf of mexico': 'North America',
+  gom: 'North America',
+  'latin america': 'South America',
+  australia: 'Oceania',
+}
+const COUNTRY_CONTINENT_MAP: Record<string, string> = {
+  angola: 'Africa',
+  algeria: 'Africa',
+  'cote d ivoire': 'Africa',
+  'cote d\'ivoire': 'Africa',
+  egypt: 'Africa',
+  'equatorial guinea': 'Africa',
+  ghana: 'Africa',
+  mozambique: 'Africa',
+  namibia: 'Africa',
+  nigeria: 'Africa',
+  senegal: 'Africa',
+  tanzania: 'Africa',
+  azerbaijan: 'Asia',
+  brunei: 'Asia',
+  china: 'Asia',
+  india: 'Asia',
+  indonesia: 'Asia',
+  iraq: 'Asia',
+  israel: 'Asia',
+  japan: 'Asia',
+  kazakhstan: 'Asia',
+  kuwait: 'Asia',
+  malaysia: 'Asia',
+  oman: 'Asia',
+  qatar: 'Asia',
+  'saudi arabia': 'Asia',
+  singapore: 'Asia',
+  thailand: 'Asia',
+  uae: 'Asia',
+  'united arab emirates': 'Asia',
+  vietnam: 'Asia',
+  denmark: 'Europe',
+  england: 'Europe',
+  france: 'Europe',
+  germany: 'Europe',
+  ireland: 'Europe',
+  italy: 'Europe',
+  netherlands: 'Europe',
+  norge: 'Europe',
+  norway: 'Europe',
+  portugal: 'Europe',
+  russia: 'Europe',
+  scotland: 'Europe',
+  spain: 'Europe',
+  sweden: 'Europe',
+  uk: 'Europe',
+  'united kingdom': 'Europe',
+  canada: 'North America',
+  mexico: 'North America',
+  trinidad: 'North America',
+  'trinidad and tobago': 'North America',
+  usa: 'North America',
+  'united states': 'North America',
+  australia: 'Oceania',
+  'new zealand': 'Oceania',
+  argentina: 'South America',
+  brazil: 'South America',
+  chile: 'South America',
+  colombia: 'South America',
+  ecuador: 'South America',
+  guyana: 'South America',
+  peru: 'South America',
+  suriname: 'South America',
+  uruguay: 'South America',
+  venezuela: 'South America',
+}
+const REGION_CONTINENT_SCOPE: Record<string, string[]> = {
+  'asia australia': ['Asia', 'Oceania'],
+  'middle east russia': ['Asia', 'Europe'],
+}
 
 function normalize(input: string | undefined): string {
   return (input ?? '').trim().toLowerCase()
+}
+
+function normalizeGeoKey(input: string | undefined): string {
+  return normalize(input).replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function resolveContinentLabel(value: string | undefined): string | null {
+  const normalizedValue = normalizeGeoKey(value)
+  if (!normalizedValue) return null
+  return CONTINENT_LABEL_MAP[normalizedValue]
+    || CONTINENT_ALIAS_MAP[normalizedValue]
+    || COUNTRY_CONTINENT_MAP[normalizedValue]
+    || null
+}
+
+function getProjectContinent(project: Pick<Project, 'continent' | 'country'>): string | null {
+  return resolveContinentLabel(project.continent)
+    || resolveContinentLabel(project.country)
+    || null
+}
+
+function getRegionScopeContinents(regionLabel: string): string[] {
+  const normalizedLabel = normalizeGeoKey(regionLabel)
+  if (!normalizedLabel) return []
+  if (REGION_CONTINENT_SCOPE[normalizedLabel]) return REGION_CONTINENT_SCOPE[normalizedLabel]
+  const direct = resolveContinentLabel(regionLabel)
+  return direct ? [direct] : []
 }
 
 function normalizeMetricName(metric: string | null | undefined): string {
@@ -1541,6 +1661,18 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
   const viewCharts = useMemo(() => buildChartsFromProjects(viewProjects), [viewProjects])
   const viewCompanies = useMemo(() => buildCompaniesFromProjects(viewProjects), [viewProjects])
+  const continentDistribution = useMemo(() => {
+    const counts = new Map<string, number>()
+    viewProjects.forEach((project) => {
+      const continent = getProjectContinent(project)
+      if (!continent) return
+      counts.set(continent, (counts.get(continent) ?? 0) + 1)
+    })
+
+    return Array.from(counts.entries())
+      .map(([continent, count]) => ({ continent, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [viewProjects])
 
   const computedStats = useMemo<Stats>(() => {
     const continents = new Set<string>()
@@ -1548,7 +1680,8 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     let totalXmts = 0
 
     viewProjects.forEach((project) => {
-      if (project.continent) continents.add(project.continent)
+      const continent = getProjectContinent(project)
+      if (continent) continents.add(continent)
       totalSurfKm += project.surf_km || 0
       totalXmts += project.xmt_count || 0
     })
@@ -1707,7 +1840,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     //   label: view === 'historical' ? 'Awards siste 12m' : 'Kommende prosjekter',
     //   value: loading ? '—' : computedStats.upcomingAwards.toLocaleString('en-US'),
     // },
-    { key: 'regions', label: 'Regioner', value: loading ? '—' : computedStats.regionCount.toLocaleString('en-US') },
+    { key: 'regions', label: 'Kontinenter', value: loading ? '—' : computedStats.regionCount.toLocaleString('en-US') },
   ]
 
   const openInsightPanel = (next: InsightState) => {
@@ -1802,9 +1935,48 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     })
   }
 
-  const getProjectsByYear = (year: number): Project[] => (
-    viewProjects.filter((project) => getProjectYear(project) === year)
+  const resolveProjectScope = (sourceProjects?: Project[]): Project[] => {
+    if (sourceProjects) return sourceProjects
+    if (insight?.source === 'projects' && Array.isArray(insight.projects)) return insight.projects
+    return viewProjects
+  }
+
+  const getProjectsByYear = (year: number, sourceProjects?: Project[]): Project[] => (
+    resolveProjectScope(sourceProjects).filter((project) => getProjectYear(project) === year)
   )
+
+  const openContinentInsight = (continent: string, sourceProjects?: Project[]) => {
+    const baseProjects = resolveProjectScope(sourceProjects)
+    const selectedProjects = baseProjects.filter(
+      (project) => normalize(getProjectContinent(project) || '') === normalize(continent)
+    )
+    const selectedCharts = buildChartsFromProjects(selectedProjects)
+    const topOperators = aggregateProjectMetric(
+      selectedProjects,
+      (project) => project.operator || 'Ukjent operatør',
+      () => 1
+    ).slice(0, 10)
+
+    buildProjectInsight({
+      id: `continent-${normalize(continent)}`,
+      title: `Kontinent: ${continent}`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      selectedProjects,
+      chartTitle: 'Land med høyest aktivitet',
+      chartFormat: 'count',
+      chartData: selectedCharts.byCountry.slice(0, 12).map((item) => ({ label: item.country, value: item.count })),
+      onBarClick: (item) => openCountryInsight(item.label, selectedProjects),
+      listTitle: 'Operatører',
+      listItems: topOperators.map((item) => ({
+        label: item.label,
+        value: Math.round(item.value).toLocaleString('en-US'),
+        onClick: () => openOperatorInsight(item.label, selectedProjects),
+      })),
+      extraMetrics: [
+        { label: 'Land', value: selectedCharts.byCountry.length.toLocaleString('en-US') },
+      ],
+    })
+  }
 
   const openSummaryKpiInsight = (key: SummaryKpiKey) => {
     if (loading) return
@@ -1869,7 +2041,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         listItems: topContractors.map((item) => ({
           label: item.label,
           value: `${Math.round(item.value).toLocaleString('en-US')} km`,
-          onClick: () => openContractorInsight(item.label),
+          onClick: () => openContractorInsight(item.label, projectsWithSurf),
         })),
         extraMetrics: [
           {
@@ -1912,7 +2084,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         listItems: topOperators.map((item) => ({
           label: item.label,
           value: Math.round(item.value).toLocaleString('en-US'),
-          onClick: () => openOperatorInsight(item.label),
+          onClick: () => openOperatorInsight(item.label, projectsWithXmt),
         })),
       })
       return
@@ -1935,7 +2107,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         chartTitle: 'Fordeling per land',
         chartFormat: 'count',
         chartData: selectedCharts.byCountry.slice(0, 10).map((item) => ({ label: item.country, value: item.count })),
-        onBarClick: (item) => openCountryInsight(item.label),
+        onBarClick: (item) => openCountryInsight(item.label, selectedProjects),
         listTitle: 'Nærmeste prosjekter',
         listItems: [...selectedProjects]
           .sort((a, b) => (getProjectYear(a) ?? 9999) - (getProjectYear(b) ?? 9999))
@@ -1949,30 +2121,23 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       return
     }
 
-    const continentMap = new Map<string, number>()
-    viewProjects.forEach((project) => {
-      const continent = project.continent || 'Ukjent region'
-      continentMap.set(continent, (continentMap.get(continent) ?? 0) + 1)
-    })
-
     buildProjectInsight({
       id: 'summary-regions',
-      title: 'Regioner',
-      subtitle: `${computedStats.regionCount.toLocaleString('en-US')} regioner i view`,
+      title: 'Kontinenter',
+      subtitle: `${computedStats.regionCount.toLocaleString('en-US')} kontinenter i view`,
       description: 'Bruk denne for rask oversikt over regional dekning.',
       selectedProjects: viewProjects,
-      chartTitle: 'Land med høyest aktivitet',
+      chartTitle: 'Kontinentfordeling',
       chartFormat: 'count',
-      chartData: viewCharts.byCountry.slice(0, 12).map((item) => ({ label: item.country, value: item.count })),
-      onBarClick: (item) => openCountryInsight(item.label),
+      chartData: continentDistribution.slice(0, 12).map((item) => ({ label: item.continent, value: item.count })),
+      onBarClick: (item) => openContinentInsight(item.label, viewProjects),
       listTitle: 'Kontinentfordeling',
-      listItems: Array.from(continentMap.entries())
-        .map(([label, value]) => ({ label, value }))
-        .sort((a, b) => b.value - a.value)
+      listItems: continentDistribution
+        .slice(0, 10)
         .map((item) => ({
-          label: item.label,
-          value: item.value.toLocaleString('en-US'),
-          onClick: () => openRegionalRegionInsight(item.label),
+          label: item.continent,
+          value: item.count.toLocaleString('en-US'),
+          onClick: () => openContinentInsight(item.continent, viewProjects),
         })),
       extraMetrics: [
         { label: 'Land', value: viewCharts.byCountry.length.toLocaleString('en-US') },
@@ -2017,13 +2182,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Faser i valgt år',
       chartFormat: 'count',
       chartData: phaseBreakdown.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
-      onBarClick: (item) => openPhaseInsight(item.label),
+      onBarClick: (item) => openPhaseInsight(item.label, selectedProjects),
       listTitle: 'Prosjekter med høyest estimert verdi',
       listItems: topProjects.map((project) => ({
         label: getProjectDisplayName(project),
         value: formatMillions(estimateProjectValue(project)),
         detail: `${project.country || 'Ukjent land'} • ${project.operator || project.surf_contractor || 'Ukjent aktør'}`,
-        onClick: () => openCountryInsight(project.country),
+        onClick: () => openCountryInsight(project.country, selectedProjects),
       })),
       projects: selectedProjects,
     })
@@ -2045,18 +2210,19 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'count',
       chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
-      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y, selectedProjects) },
       listTitle: 'Største markeder i fasen',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
-        onClick: () => openCountryInsight(item.country),
+        onClick: () => openCountryInsight(item.country, selectedProjects),
       })),
     })
   }
 
-  const openPhaseInsight = (phase: string) => {
-    const selectedProjects = viewProjects.filter(
+  const openPhaseInsight = (phase: string, sourceProjects?: Project[]) => {
+    const baseProjects = resolveProjectScope(sourceProjects)
+    const selectedProjects = baseProjects.filter(
       (project) => normalize(project.facility_category || 'Unknown') === normalize(phase)
     )
     const selectedCharts = buildChartsFromProjects(selectedProjects)
@@ -2070,18 +2236,19 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'count',
       chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
-      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y, selectedProjects) },
       listTitle: 'Største land i fasen',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
-        onClick: () => openCountryInsight(item.country),
+        onClick: () => openCountryInsight(item.country, selectedProjects),
       })),
     })
   }
 
-  const openCountryInsight = (country: string) => {
-    const selectedProjects = viewProjects.filter((project) => normalize(project.country) === normalize(country))
+  const openCountryInsight = (country: string, sourceProjects?: Project[]) => {
+    const baseProjects = resolveProjectScope(sourceProjects)
+    const selectedProjects = baseProjects.filter((project) => normalize(project.country) === normalize(country))
     const selectedCharts = buildChartsFromProjects(selectedProjects)
 
     buildProjectInsight({
@@ -2092,7 +2259,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Fasefordeling',
       chartFormat: 'count',
       chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
-      onBarClick: (item) => openPhaseInsight(item.label),
+      onBarClick: (item) => openPhaseInsight(item.label, selectedProjects),
       listTitle: 'Viktigste operatører',
       listItems: aggregateProjectMetric(
         selectedProjects,
@@ -2103,13 +2270,14 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         .map((item) => ({
           label: item.label,
           value: Math.round(item.value).toLocaleString('en-US'),
-          onClick: () => openOperatorInsight(item.label),
+          onClick: () => openOperatorInsight(item.label, selectedProjects),
         })),
     })
   }
 
-  const openDepthInsight = (depth: string) => {
-    const selectedProjects = viewProjects.filter(
+  const openDepthInsight = (depth: string, sourceProjects?: Project[]) => {
+    const baseProjects = resolveProjectScope(sourceProjects)
+    const selectedProjects = baseProjects.filter(
       (project) => normalize(project.water_depth_category || 'Unknown') === normalize(depth)
     )
     const selectedCharts = buildChartsFromProjects(selectedProjects)
@@ -2123,22 +2291,23 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'count',
       chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
-      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y, selectedProjects) },
       listTitle: 'Største land for dybdekategorien',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
-        onClick: () => openCountryInsight(item.country),
+        onClick: () => openCountryInsight(item.country, selectedProjects),
       })),
     })
   }
 
   const openContractorInsight = (
     contractor: string,
-    sourceProjects: Project[] = viewProjects,
+    sourceProjects?: Project[],
     options?: { scopeId?: string; scopeLabel?: string }
   ) => {
-    const selectedProjects = sourceProjects.filter(
+    const baseProjects = resolveProjectScope(sourceProjects)
+    const selectedProjects = baseProjects.filter(
       (project) => normalize(project.surf_contractor) === normalize(contractor)
     )
     const selectedCharts = buildChartsFromProjects(selectedProjects)
@@ -2154,12 +2323,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartKind: 'area',
       chartFormat: 'count',
       chartData: selectedCharts.byYear.map((item) => ({ label: String(item.year), value: item.count })),
-      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y) },
+      onBarClick: (item) => { const y = Number(item.label); if (Number.isFinite(y)) openYearInsight(y, selectedProjects) },
       listTitle: 'Land der contractor er aktiv',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
-        onClick: () => openCountryInsight(item.country),
+        onClick: () => openCountryInsight(item.country, selectedProjects),
       })),
       extraMetrics: [
         {
@@ -2170,8 +2339,9 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     })
   }
 
-  const openOperatorInsight = (operator: string) => {
-    const selectedProjects = viewProjects.filter((project) => normalize(project.operator) === normalize(operator))
+  const openOperatorInsight = (operator: string, sourceProjects?: Project[]) => {
+    const baseProjects = resolveProjectScope(sourceProjects)
+    const selectedProjects = baseProjects.filter((project) => normalize(project.operator) === normalize(operator))
     const selectedCharts = buildChartsFromProjects(selectedProjects)
 
     buildProjectInsight({
@@ -2182,7 +2352,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Fasefordeling',
       chartFormat: 'count',
       chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
-      onBarClick: (item) => openPhaseInsight(item.label),
+      onBarClick: (item) => openPhaseInsight(item.label, selectedProjects),
       listTitle: 'Contractors i operatørporteføljen',
       listItems: aggregateProjectMetric(
         selectedProjects,
@@ -2201,10 +2371,11 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     })
   }
 
-  const openYearInsight = (year: number) => {
-    const selectedProjects = getProjectsByYear(year)
+  const openYearInsight = (year: number, sourceProjects?: Project[]) => {
+    const baseProjects = resolveProjectScope(sourceProjects)
+    const selectedProjects = getProjectsByYear(year, baseProjects)
     const selectedCharts = buildChartsFromProjects(selectedProjects)
-    const coveragePct = viewProjects.length > 0 ? (selectedProjects.length / viewProjects.length) * 100 : 0
+    const coveragePct = baseProjects.length > 0 ? (selectedProjects.length / baseProjects.length) * 100 : 0
     const useRawYearTotals = view === 'future' && region === 'All'
     const rawXmtForYear = projectYearTotals.xmt[year]
     const rawSurfForYear = projectYearTotals.surf[year]
@@ -2229,12 +2400,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
       chartTitle: 'Fasefordeling',
       chartFormat: 'count',
       chartData: selectedCharts.byPhase.slice(0, 10).map((item) => ({ label: item.phase, value: item.count })),
-      onBarClick: (item) => openPhaseInsight(item.label),
+      onBarClick: (item) => openPhaseInsight(item.label, selectedProjects),
       listTitle: 'Største land',
       listItems: selectedCharts.byCountry.slice(0, 10).map((item) => ({
         label: item.country,
         value: item.count.toLocaleString('en-US'),
-        onClick: () => openCountryInsight(item.country),
+        onClick: () => openCountryInsight(item.country, selectedProjects),
       })),
       projects: selectedProjects,
     })
@@ -2429,12 +2600,12 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         label: item.label,
         value: item.value,
       })),
-      onBarClick: (item) => openOperatorInsight(item.label),
+      onBarClick: (item) => openOperatorInsight(item.label, linkedProjects),
       listTitle: 'Topp operatører',
       listItems: operatorBreakdown.map((item) => ({
         label: item.label,
         value: Math.round(item.value).toLocaleString('en-US'),
-        onClick: () => openOperatorInsight(item.label),
+        onClick: () => openOperatorInsight(item.label, linkedProjects),
       })),
       projects: linkedProjects,
     })
@@ -2492,9 +2663,13 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
     const latest = timeline[timeline.length - 1]
     const previous = timeline.length > 1 ? timeline[timeline.length - 2] : null
-    const linkedProjects = viewProjects.filter((project) =>
-      normalize(project.continent).includes(normalize(regionLabel))
-    )
+    const regionContinentScope = new Set(getRegionScopeContinents(regionLabel).map((item) => normalize(item)))
+    const linkedProjects = viewProjects.filter((project) => {
+      const continent = getProjectContinent(project)
+      if (!continent) return false
+      if (regionContinentScope.size > 0) return regionContinentScope.has(normalize(continent))
+      return normalize(project.continent).includes(normalize(regionLabel))
+    })
 
     openInsightPanel({
       id: `regional-region-${normalize(regionLabel)}`,
@@ -2918,7 +3093,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           </Panel>
 
           <Panel title="Regional fordeling">
-            {!viewCharts.byCountry.length ? (
+            {!continentDistribution.length ? (
               <LoadingPlaceholder />
             ) : (
               <div className="flex items-center gap-4">
@@ -2926,22 +3101,22 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                   <ResponsiveContainer>
                     <PieChart>
                       <Pie
-                        data={viewCharts.byCountry.slice(0, 6)}
+                        data={continentDistribution.slice(0, 6)}
                         dataKey="count"
-                        nameKey="country"
+                        nameKey="continent"
                         cx="50%"
                         cy="50%"
                         innerRadius={38}
                         outerRadius={70}
                         strokeWidth={0}
                         onClick={(raw: unknown) => {
-                          const data = raw as { country?: string }
-                          if (data.country) openCountryInsight(data.country)
+                          const data = raw as { continent?: string }
+                          if (data.continent) openContinentInsight(data.continent, viewProjects)
                         }}
                         className="cursor-pointer"
                       >
-                        {viewCharts.byCountry.slice(0, 6).map((entry, index) => (
-                          <Cell key={`${entry.country}-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
+                        {continentDistribution.slice(0, 6).map((entry, index) => (
+                          <Cell key={`${entry.continent}-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
                         ))}
                       </Pie>
                       <Tooltip content={<CompactTooltip />} />
@@ -2949,15 +3124,15 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                   </ResponsiveContainer>
                 </div>
                 <div className="flex flex-col gap-2 w-full">
-                  {viewCharts.byCountry.slice(0, 6).map((item, index) => (
+                  {continentDistribution.slice(0, 6).map((item, index) => (
                     <button
-                      key={item.country}
+                      key={item.continent}
                       type="button"
-                      onClick={() => openCountryInsight(item.country)}
+                      onClick={() => openContinentInsight(item.continent, viewProjects)}
                       className="flex items-center gap-2 text-xs text-left rounded px-2 py-1 hover:bg-[color:rgba(77,184,158,0.08)] cursor-pointer transition-colors"
                     >
                       <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }} />
-                      <span className="truncate text-[var(--text-muted)]">{item.country}</span>
+                      <span className="truncate text-[var(--text-muted)]">{item.continent}</span>
                       <span className="font-mono font-semibold ml-auto text-white">{item.count.toLocaleString('en-US')}</span>
                     </button>
                   ))}
