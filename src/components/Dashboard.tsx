@@ -2779,7 +2779,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             )}
           </Panel>
 
-          <Panel title="Contries">
+          <Panel title="Countries">
             {!viewCharts.byCountry.length ? (
               <LoadingPlaceholder />
             ) : (
