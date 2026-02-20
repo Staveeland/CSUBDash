@@ -2,6 +2,22 @@ import { NextResponse } from 'next/server'
 import { requireAllowedApiUser } from '@/lib/auth/require-user'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 
+function normalizeKeyPart(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
+function buildProjectLookupKey(input: {
+  development_project?: string | null
+  asset?: string | null
+  country?: string | null
+}): string {
+  return [
+    normalizeKeyPart(input.development_project ?? input.asset),
+    normalizeKeyPart(input.asset),
+    normalizeKeyPart(input.country),
+  ].join('|')
+}
+
 function parseYear(value: string | null | undefined): number | null {
   if (!value) return null
   const yearOnly = Number(value)
@@ -17,7 +33,7 @@ export async function GET() {
     if (!auth.ok) return auth.response
     const supabase = auth.supabase
 
-    const [projectsRes, contractsRes] = await Promise.all([
+    const [projectsRes, contractsRes, xmtDataRes] = await Promise.all([
       fetchAll(supabase, 'projects', `
           development_project,
           asset,
@@ -48,6 +64,13 @@ export async function GET() {
           created_at,
           water_depth_m
         `),
+      fetchAll(supabase, 'xmt_data', `
+          development_project,
+          asset,
+          country,
+          surf_contractor,
+          year
+        `),
     ])
 
     if (projectsRes.error) {
@@ -56,14 +79,44 @@ export async function GET() {
     if (contractsRes.error) {
       console.error('contracts query failed:', contractsRes.error)
     }
+    if (xmtDataRes.error) {
+      console.error('xmt_data query failed:', xmtDataRes.error)
+    }
 
     if (projectsRes.error && contractsRes.error) {
       throw new Error(`Both dashboard queries failed: projects=${projectsRes.error.message} contracts=${contractsRes.error.message}`)
     }
 
+    const xmtProducerByProject = new Map<string, { producer: string; year: number }>()
+    const xmtRows = xmtDataRes.error ? [] : (xmtDataRes.data || [])
+    for (const row of xmtRows) {
+      const producer = typeof row.surf_contractor === 'string' ? row.surf_contractor.trim() : ''
+      if (!producer) continue
+      const lookupKey = buildProjectLookupKey({
+        development_project: row.development_project,
+        asset: row.asset,
+        country: row.country,
+      })
+      if (lookupKey === '||') continue
+      const rowYear =
+        typeof row.year === 'number' && Number.isFinite(row.year)
+          ? row.year
+          : parseYear(typeof row.year === 'string' ? row.year : null) ?? 0
+      const existing = xmtProducerByProject.get(lookupKey)
+      if (!existing || rowYear >= existing.year) {
+        xmtProducerByProject.set(lookupKey, { producer, year: rowYear })
+      }
+    }
+
     const projects = (projectsRes.error ? [] : projectsRes.data || []).map((project) => {
       const firstYear = project.first_year || parseYear(project.created_at)
       const lastYear = project.last_year || firstYear
+      const lookupKey = buildProjectLookupKey({
+        development_project: project.development_project,
+        asset: project.asset,
+        country: project.country,
+      })
+      const xmtProducer = xmtProducerByProject.get(lookupKey)?.producer || project.surf_contractor || ''
       return {
         development_project: project.development_project || project.asset || 'Unknown project',
         asset: project.asset || '',
@@ -71,6 +124,7 @@ export async function GET() {
         continent: project.continent || 'Unknown',
         operator: project.operator || '',
         surf_contractor: project.surf_contractor || '',
+        xmt_producer: xmtProducer,
         facility_category: project.facility_category || 'Unknown',
         water_depth_category: project.water_depth_category || 'Unknown',
         xmt_count: project.xmt_count || 0,
@@ -93,6 +147,7 @@ export async function GET() {
         continent: contract.region || 'Unknown',
         operator: contract.operator || '',
         surf_contractor: contract.contractor || '',
+        xmt_producer: contract.contractor || '',
         facility_category: contract.contract_type || 'Contract',
         water_depth_category: typeof contract.water_depth_m === 'number' ? `${contract.water_depth_m} m` : 'Unknown',
         xmt_count: 0,

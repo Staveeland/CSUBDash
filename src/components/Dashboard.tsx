@@ -58,6 +58,7 @@ interface Project {
   continent: string
   operator: string
   surf_contractor: string
+  xmt_producer?: string
   facility_category: string
   water_depth_category: string
   xmt_count: number
@@ -121,7 +122,7 @@ interface ActivityItem {
 }
 
 type TableSortDirection = 'asc' | 'desc'
-type TableSortKey = 'project' | 'year' | 'country' | 'operator' | 'contractor' | 'depth' | 'xmt' | 'surf'
+type TableSortKey = 'project' | 'year' | 'country' | 'operator' | 'xmtProducer' | 'contractor' | 'depth' | 'xmt' | 'surf'
 
 interface TableSortConfig {
   key: TableSortKey
@@ -209,14 +210,15 @@ const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
 const FUTURE_ACTIVITY_LIMIT = 20
 const DEFAULT_TABLE_ROWS = 15
 const TABLE_COLUMNS: { key: TableSortKey; label: string; align?: 'left' | 'right'; width: string }[] = [
-  { key: 'project', label: 'Prosjekt', width: '20%' },
-  { key: 'year', label: 'År', width: '9%' },
-  { key: 'country', label: 'Land', width: '11%' },
-  { key: 'operator', label: 'Operatør', width: '14%' },
-  { key: 'contractor', label: 'SURF Contractor', width: '14%' },
-  { key: 'depth', label: 'Vanndybde', width: '12%' },
-  { key: 'xmt', label: 'XMTs', align: 'right', width: '10%' },
-  { key: 'surf', label: 'SURF km', align: 'right', width: '10%' },
+  { key: 'project', label: 'Prosjekt', width: '17%' },
+  { key: 'year', label: 'År', width: '8%' },
+  { key: 'country', label: 'Land', width: '10%' },
+  { key: 'operator', label: 'Operatør', width: '12%' },
+  { key: 'xmtProducer', label: 'XMT Producer', width: '12%' },
+  { key: 'contractor', label: 'SURF Contractor', width: '12%' },
+  { key: 'depth', label: 'Vanndybde', width: '11%' },
+  { key: 'xmt', label: 'XMTs', align: 'right', width: '9%' },
+  { key: 'surf', label: 'SURF km', align: 'right', width: '9%' },
 ]
 
 const REGION_KEYS = [
@@ -615,6 +617,8 @@ function getTableSortValue(project: Project, key: TableSortKey): string | number
       return normalize(project.country)
     case 'operator':
       return normalize(project.operator)
+    case 'xmtProducer':
+      return normalize(project.xmt_producer || project.surf_contractor)
     case 'contractor':
       return normalize(project.surf_contractor)
     case 'depth':
@@ -1651,6 +1655,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
           project.development_project,
           project.asset,
           project.operator,
+          project.xmt_producer,
           project.surf_contractor,
           project.country,
         ]
@@ -3263,7 +3268,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
             )}
           </div>
           <div className="overflow-x-auto w-full">
-            <table className="w-full min-w-[980px] table-fixed text-left text-sm whitespace-nowrap">
+            <table className="w-full min-w-[1120px] table-fixed text-left text-sm whitespace-nowrap">
               <colgroup>
                 {TABLE_COLUMNS.map((column) => (
                   <col key={`col-${column.key}`} style={{ width: column.width }} />
@@ -3326,6 +3331,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                         <td className="px-4 py-3 font-mono text-[var(--text-muted)] max-w-0 truncate">{getProjectYearLabel(project)}</td>
                         <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.country || '—'}</td>
                         <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.operator || '—'}</td>
+                        <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.xmt_producer || project.surf_contractor || '—'}</td>
                         <td className="px-4 py-3 text-[var(--text-muted)] max-w-0 truncate">{project.surf_contractor || '—'}</td>
                         <td className="px-4 py-3 font-mono text-white max-w-0 truncate">{project.water_depth_category || '—'}</td>
                         <td className="px-4 py-3 font-mono text-white text-right tabular-nums">{(project.xmt_count || 0).toLocaleString('en-US')}</td>
@@ -3499,6 +3505,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
                 <DrawerRow label="Land" value={selectedProject.country} />
                 <DrawerRow label="Kontinent" value={selectedProject.continent} />
                 <DrawerRow label="Operatør" value={selectedProject.operator} />
+                <DrawerRow label="XMT Producer" value={selectedProject.xmt_producer || selectedProject.surf_contractor} />
                 <DrawerRow label="SURF Contractor" value={selectedProject.surf_contractor} />
                 <DrawerRow label="Kategori" value={selectedProject.facility_category} />
                 <DrawerRow label="Vanndybde" value={selectedProject.water_depth_category} />
