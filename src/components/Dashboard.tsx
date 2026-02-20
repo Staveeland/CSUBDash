@@ -2133,16 +2133,22 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     })
   }
 
-  const openContractorInsight = (contractor: string) => {
-    const selectedProjects = viewProjects.filter(
+  const openContractorInsight = (
+    contractor: string,
+    sourceProjects: Project[] = viewProjects,
+    options?: { scopeId?: string; scopeLabel?: string }
+  ) => {
+    const selectedProjects = sourceProjects.filter(
       (project) => normalize(project.surf_contractor) === normalize(contractor)
     )
     const selectedCharts = buildChartsFromProjects(selectedProjects)
+    const scopeIdPart = options?.scopeId ? `-${options.scopeId.replace(/[^a-z0-9-]/gi, '-')}` : ''
+    const scopeLabelPart = options?.scopeLabel ? ` (${options.scopeLabel})` : ''
 
     buildProjectInsight({
-      id: `contractor-${normalize(contractor)}`,
+      id: `contractor-${normalize(contractor)}${scopeIdPart}`,
       title: `Contractor: ${contractor}`,
-      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter`,
+      subtitle: `${selectedProjects.length.toLocaleString('en-US')} prosjekter${scopeLabelPart}`,
       selectedProjects,
       chartTitle: 'Prosjekter per år',
       chartKind: 'area',
@@ -2187,7 +2193,10 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         .map((item) => ({
           label: item.label,
           value: Math.round(item.value).toLocaleString('en-US'),
-          onClick: () => openContractorInsight(item.label),
+          onClick: () => openContractorInsight(item.label, selectedProjects, {
+            scopeId: `operator-${normalize(operator)}`,
+            scopeLabel: 'i operatørporteføljen',
+          }),
         })),
     })
   }
