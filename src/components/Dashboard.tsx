@@ -971,6 +971,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const [tableSort, setTableSort] = useState<TableSortConfig | null>(null)
   const [showAllTableRows, setShowAllTableRows] = useState(false)
   const [insight, setInsight] = useState<InsightState | null>(null)
+  const [insightHistory, setInsightHistory] = useState<InsightState[]>([])
 
   // Market Intelligence state
   const [forecasts, setForecasts] = useState<ForecastRecord[]>([])
@@ -1068,6 +1069,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
   useEffect(() => {
     setInsight(null)
+    setInsightHistory([])
   }, [region, view])
 
   const fetchMarketData = useCallback(async () => {
@@ -1615,6 +1617,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
   const openDrawer = (project: Project) => {
     setInsight(null)
+    setInsightHistory([])
     setSelectedProject(project)
     setDrawerOpen(true)
   }
@@ -1710,15 +1713,34 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
   const openInsightPanel = (next: InsightState) => {
     setDrawerOpen(false)
     setSelectedProject(null)
+    setInsightHistory((history) => {
+      if (!history.length) return [next]
+      const current = history[history.length - 1]
+      if (current?.id === next.id) {
+        return [...history.slice(0, -1), next]
+      }
+      return [...history, next]
+    })
     setInsight(next)
   }
 
   const closeInsightPanel = () => {
     setInsight(null)
+    setInsightHistory([])
+  }
+
+  const goBackInsightPanel = () => {
+    setInsightHistory((history) => {
+      if (history.length <= 1) return history
+      const previous = history.slice(0, -1)
+      setInsight(previous[previous.length - 1] ?? null)
+      return previous
+    })
   }
 
   const openProjectFromInsight = (project: Project) => {
     setInsight(null)
+    setInsightHistory([])
     setSelectedProject(project)
     setDrawerOpen(true)
   }
@@ -2582,6 +2604,7 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
 
   const clickableCardClass = 'cursor-pointer transition-colors hover:border-[var(--csub-gold-soft)] hover:bg-[color:rgba(77,184,158,0.08)]'
   const isInsightOpen = Boolean(insight)
+  const canGoBackInsight = insightHistory.length > 1
   const activityLoading = loading || (view === 'future' && competitorLoading)
   const activeInsightCountry = insight?.id.startsWith('country-')
     ? insight.title.replace(/^Land:\s*/i, '')
@@ -3208,6 +3231,8 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
         insight={insight}
         open={isInsightOpen}
         onClose={closeInsightPanel}
+        onBack={goBackInsightPanel}
+        canGoBack={canGoBackInsight}
         onSelectProject={openProjectFromInsight}
       />
 
@@ -3361,11 +3386,15 @@ function InsightDrawer({
   insight,
   open,
   onClose,
+  onBack,
+  canGoBack,
   onSelectProject,
 }: {
   insight: InsightState | null
   open: boolean
   onClose: () => void
+  onBack: () => void
+  canGoBack: boolean
   onSelectProject: (project: Project) => void
 }) {
   if (!insight) return null
@@ -3405,14 +3434,26 @@ function InsightDrawer({
                 <h3 className="text-lg text-white mt-1 truncate">{insight.title}</h3>
                 {insight.subtitle && <p className="text-xs text-[var(--text-muted)] mt-1">{insight.subtitle}</p>}
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="text-white text-xl px-2 py-1 rounded hover:bg-white/15 cursor-pointer"
-                aria-label="Lukk drill-down"
-              >
-                ×
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {canGoBack && (
+                  <button
+                    type="button"
+                    onClick={onBack}
+                    className="rounded-md border border-[var(--csub-light-soft)] px-2.5 py-1 text-xs text-[var(--text-muted)] hover:text-white hover:border-[var(--csub-light)] transition-colors cursor-pointer"
+                    aria-label="Gå tilbake i drill-down"
+                  >
+                    ← Tilbake
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="text-white text-xl px-2 py-1 rounded hover:bg-white/15 cursor-pointer"
+                  aria-label="Lukk drill-down"
+                >
+                  ×
+                </button>
+              </div>
             </div>
             {insight.description && (
               <p className="text-xs text-[var(--text-muted)] mt-3 leading-relaxed">{insight.description}</p>
