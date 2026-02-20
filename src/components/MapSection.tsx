@@ -2,7 +2,7 @@
 
 import { Canvas } from '@react-three/fiber'
 import { Billboard, Line, OrbitControls, Stars, useTexture } from '@react-three/drei'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 
 const COUNTRY_COORDS: Record<string, [number, number]> = {
@@ -51,6 +51,7 @@ const RAL1004_PRIMARY = '#e4a010'
 const RAL1004_MEDIUM = '#d79918'
 const RAL1004_LIGHT = '#ffd57a'
 const RAL1004_NODE_ACTIVE = '#ffe8b3'
+const AUTO_ROTATE_SPEED = 0.25
 
 function latLonToVector3(lat: number, lon: number, radius: number): [number, number, number] {
   const phi = (90 - lat) * (Math.PI / 180)
@@ -238,7 +239,40 @@ function LedNodes({
 
 export default function MapSection({ countryData, onCountrySelect, activeCountry }: Props) {
   const activeCountryKey = normalizeCountryName(activeCountry ?? '')
+  const mapContainerRef = useRef<HTMLDivElement | null>(null)
   const [hoveredCountryKey, setHoveredCountryKey] = useState<string | null>(null)
+  const [autoRotateEnabled, setAutoRotateEnabled] = useState(true)
+
+  const pauseAutoRotate = useCallback(() => {
+    setAutoRotateEnabled((current) => (current ? false : current))
+  }, [])
+
+  const resumeAutoRotate = useCallback(() => {
+    setAutoRotateEnabled((current) => (current ? current : true))
+  }, [])
+
+  useEffect(() => {
+    const handleScroll = () => {
+      resumeAutoRotate()
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const mapNode = mapContainerRef.current
+      if (!mapNode) return
+      const targetNode = event.target
+      if (targetNode instanceof Node && !mapNode.contains(targetNode)) {
+        resumeAutoRotate()
+      }
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    document.addEventListener('pointerdown', handlePointerDown)
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      document.removeEventListener('pointerdown', handlePointerDown)
+    }
+  }, [resumeAutoRotate])
   const maxCount = Math.max(...countryData.map((item) => item.count || 0), 1)
   const totalCount = Math.max(countryData.reduce((sum, item) => sum + (item.count || 0), 0), 1)
   const rankByCountryKey = useMemo(() => {
@@ -299,7 +333,13 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
   const infoStateLabel = hoveredPoint ? 'HOVER' : activePoint ? 'VALGT' : null
 
   return (
-    <div className="relative w-full h-[430px] md:h-[460px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]">
+    <div
+      ref={mapContainerRef}
+      className="relative w-full h-[430px] md:h-[460px] rounded-xl overflow-hidden border border-[var(--csub-light-soft)] shadow-lg bg-[#071610]"
+      onPointerDownCapture={pauseAutoRotate}
+      onTouchStartCapture={pauseAutoRotate}
+      onWheelCapture={pauseAutoRotate}
+    >
       <Canvas camera={{ position: [0, 0, 7.4], fov: 38 }} dpr={[1, 2]}>
         <color attach="background" args={['#0a211b']} />
         <ambientLight intensity={1.05} />
@@ -326,6 +366,9 @@ export default function MapSection({ countryData, onCountrySelect, activeCountry
           zoomSpeed={0.65}
           enableDamping
           dampingFactor={0.08}
+          autoRotate={autoRotateEnabled}
+          autoRotateSpeed={AUTO_ROTATE_SPEED}
+          onStart={pauseAutoRotate}
         />
       </Canvas>
 
