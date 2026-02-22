@@ -67,6 +67,7 @@ interface Project {
   last_year: number
   data_source?: string
   source?: string | null
+  source_url?: string | null
   [key: string]: unknown
 }
 
@@ -209,6 +210,7 @@ const BAR_COLORS = ['#4db89e', '#38917f', '#2d7368', '#245a4e', '#7dd4bf', '#1a3
 const PIPELINE_FLOW = ['FEED', 'Tender', 'Award', 'Execution', 'Closed']
 const FUTURE_ACTIVITY_LIMIT = 20
 const DEFAULT_TABLE_ROWS = 15
+const CONTRACT_AWARDS_SOURCE_URL = 'excel:Contract Awards 2024-2026 feb.xlsx'
 const TABLE_COLUMNS: { key: TableSortKey; label: string; align?: 'left' | 'right'; width: string }[] = [
   { key: 'project', label: 'Prosjekt', width: '17%' },
   { key: 'year', label: 'År', width: '8%' },
@@ -593,6 +595,10 @@ function getProjectDataSource(project: Project): string {
 
 function getProjectSource(project: Project): string {
   return typeof project.source === 'string' ? normalize(project.source) : ''
+}
+
+function getProjectSourceUrl(project: Project): string {
+  return typeof project.source_url === 'string' ? project.source_url.trim() : ''
 }
 
 function isForecastPipelineRecord(project: Project): boolean {
@@ -1604,9 +1610,11 @@ export default function Dashboard({ userEmail }: { userEmail?: string }) {
     return regionProjects.filter((project) => {
       const year = getProjectYear(project)
       const isForecastRecord = isForecastPipelineRecord(project)
+      const dataSource = getProjectDataSource(project)
 
       if (view === 'historical') {
-        if (isForecastRecord) return false
+        if (dataSource !== 'contract') return false
+        if (getProjectSourceUrl(project) !== CONTRACT_AWARDS_SOURCE_URL) return false
         if (!year) return true
         return year <= currentYear
       }
