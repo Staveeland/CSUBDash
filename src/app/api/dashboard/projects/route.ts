@@ -27,6 +27,14 @@ function parseYear(value: string | null | undefined): number | null {
   return parsed.getUTCFullYear()
 }
 
+function extractWaterDepthCategory(description: string | null | undefined): string | null {
+  if (!description) return null
+  const match = description.match(/Water depth category:\s*([^|]+)/i)
+  if (!match) return null
+  const value = match[1]?.trim()
+  return value || null
+}
+
 export async function GET() {
   try {
     const auth = await requireAllowedApiUser()
@@ -51,16 +59,14 @@ export async function GET() {
         `),
       fetchAll(supabase, 'contracts', `
           project_name,
-          title,
-          contract_name,
           description,
           contract_type,
           source,
           country,
           region,
           operator,
-          contractor,
-          award_date,
+          supplier,
+          date,
           created_at,
           water_depth_m
         `),
@@ -137,8 +143,13 @@ export async function GET() {
     })
 
     const contracts = (contractsRes.error ? [] : contractsRes.data || []).map((contract) => {
-      const contractYear = parseYear(contract.award_date) || parseYear(contract.created_at)
-      const projectName = contract.project_name || contract.title || contract.contract_name || contract.description
+      const contractYear = parseYear(contract.date) || parseYear(contract.created_at)
+      const projectName = contract.project_name || contract.description
+      const depthCategory =
+        typeof contract.water_depth_m === 'number'
+          ? `${contract.water_depth_m} m`
+          : extractWaterDepthCategory(contract.description) || 'Unknown'
+      const supplier = contract.supplier || ''
 
       return {
         development_project: projectName || contract.contract_type || 'Contract',
@@ -146,15 +157,15 @@ export async function GET() {
         country: contract.country || 'Unknown',
         continent: contract.region || 'Unknown',
         operator: contract.operator || '',
-        surf_contractor: contract.contractor || '',
-        xmt_producer: contract.contractor || '',
+        surf_contractor: supplier,
+        xmt_producer: supplier,
         facility_category: contract.contract_type || 'Contract',
-        water_depth_category: typeof contract.water_depth_m === 'number' ? `${contract.water_depth_m} m` : 'Unknown',
+        water_depth_category: depthCategory,
         xmt_count: 0,
         surf_km: 0,
         first_year: contractYear,
         last_year: contractYear,
-        award_date: contract.award_date || null,
+        award_date: contract.date || null,
         created_at: contract.created_at || null,
         source: contract.source || null,
         data_source: 'contract',
