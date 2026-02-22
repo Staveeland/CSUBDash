@@ -188,15 +188,19 @@ export default function AIAgentPanel() {
   )
 
   const activeThinkingStepIndex = thinkingSteps.length > 0
-    ? Math.min(Math.floor(thinkingElapsedSeconds / 2), thinkingSteps.length - 1)
+    ? Math.floor(thinkingElapsedSeconds / 2) % thinkingSteps.length
     : 0
   const activeThinkingStep = thinkingSteps[activeThinkingStepIndex] ?? null
+  const nextThinkingStep = thinkingSteps.length > 1
+    ? thinkingSteps[(activeThinkingStepIndex + 1) % thinkingSteps.length]
+    : null
   const activeThinkingDetail = thinkingDetails.length > 0
     ? thinkingDetails[Math.floor(thinkingElapsedSeconds / 3) % thinkingDetails.length]
     : null
-  const thinkingProgressPct = thinkingSteps.length > 0
-    ? Math.round(((activeThinkingStepIndex + 1) / thinkingSteps.length) * 100)
-    : 0
+  const thinkingSweep = thinkingSteps.length > 0
+    ? Math.floor(thinkingElapsedSeconds / Math.max(2, thinkingSteps.length * 2)) + 1
+    : 1
+  const thinkingSuffix = '.'.repeat((thinkingElapsedSeconds % 3) + 1)
 
   const sendPrompt = useCallback(async (promptText: string, isFollowUp = false) => {
     const content = promptText.trim()
@@ -440,7 +444,7 @@ export default function AIAgentPanel() {
                           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#ffe8b3] opacity-85" />
                           <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#ffd57a]" />
                         </span>
-                        <span className="text-[10px] uppercase tracking-[0.14em] text-[#ffd57a]">LLM tenker</span>
+                        <span className="text-[10px] uppercase tracking-[0.14em] text-[#ffd57a]">LLM tenker{thinkingSuffix}</span>
                       </div>
                       <span className="text-[10px] text-[var(--text-muted)]">{thinkingElapsedSeconds}s</span>
                     </div>
@@ -461,14 +465,22 @@ export default function AIAgentPanel() {
                       </p>
                     )}
 
-                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[rgba(255,213,122,0.2)]">
-                      <div
-                        className="h-full rounded-full transition-[width] duration-500"
-                        style={{
-                          width: `${Math.max(14, thinkingProgressPct)}%`,
-                          background: 'linear-gradient(90deg, #ffd57a, #ffe8b3)',
-                        }}
-                      />
+                    <div className="mt-2 rounded-md border border-[rgba(255,213,122,0.28)] bg-[rgba(10,23,20,0.45)] px-2 py-1.5">
+                      <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                        Arbeidssyklus #{thinkingSweep}
+                      </div>
+                      {activeThinkingStep && (
+                        <div className="mt-1 flex items-start gap-1.5">
+                          <span className="mt-1 inline-flex h-1.5 w-1.5 rounded-full bg-[#ffe8b3] animate-pulse" />
+                          <p className="text-[10px] leading-snug text-white/95">Aktiv nå: {activeThinkingStep}</p>
+                        </div>
+                      )}
+                      {nextThinkingStep && (
+                        <div className="mt-1 flex items-start gap-1.5">
+                          <span className="mt-1 inline-flex h-1.5 w-1.5 rounded-full border border-[rgba(255,213,122,0.75)]" />
+                          <p className="text-[10px] leading-snug text-[var(--text-muted)]">Neste: {nextThinkingStep}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
