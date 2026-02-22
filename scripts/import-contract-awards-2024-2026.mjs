@@ -148,6 +148,7 @@ function deriveContractType(packages) {
 function buildDescription({
   contractId,
   packages,
+  packageOwners,
   facilityCategory,
   waterDepthCategory,
   budget,
@@ -156,6 +157,7 @@ function buildDescription({
   const parts = []
   if (contractId) parts.push(`Contract ID: ${contractId}`)
   if (packages.length > 0) parts.push(`Packages: ${packages.join(', ')}`)
+  if (packageOwners.length > 0) parts.push(`Package owners: ${packageOwners.join('; ')}`)
   if (facilityCategory) parts.push(`Facility category: ${facilityCategory}`)
   if (waterDepthCategory) parts.push(`Water depth category: ${waterDepthCategory}`)
   if (budget) parts.push(`Budget: ${budget}`)
@@ -169,16 +171,12 @@ function buildExternalId({
   contractId,
   awardDate,
   subProject,
-  supplier,
-  packages,
 }) {
   const core = [contractId || 'no-contract-id', awardDate, subProject, `row-${rowIndex + 1}`].join('-')
   return [
     'xlsx',
     slug(fileTag),
     slug(core),
-    slug(supplier),
-    slug(packages.join('-')),
   ].join(':')
 }
 
@@ -274,57 +272,57 @@ async function main() {
       continue
     }
 
-    const supplierPackages = new Map()
+    const packageOwners = []
+    const supplierSet = new Set()
+    const packageSet = new Set()
     for (const packageColumn of PACKAGE_COLUMNS) {
       const supplier = str(row[packageColumn])
       if (!supplier) continue
-      if (!supplierPackages.has(supplier)) supplierPackages.set(supplier, [])
-      supplierPackages.get(supplier).push(packageColumn)
+      packageOwners.push(`${packageColumn}=${supplier}`)
+      supplierSet.add(supplier)
+      packageSet.add(packageColumn)
     }
 
-    if (supplierPackages.size === 0) {
+    if (supplierSet.size === 0) {
       issues.push(`Row ${index + 2}: no supplier values in package columns`)
       skippedInputRows++
       continue
     }
 
     validInputRows++
+    const suppliers = Array.from(supplierSet)
+    const packages = Array.from(packageSet)
+    const externalId = buildExternalId({
+      fileTag: args.sourceTag,
+      rowIndex: index,
+      contractId,
+      awardDate,
+      subProject,
+    })
 
-    for (const [supplier, packagesRaw] of supplierPackages.entries()) {
-      const packages = Array.from(new Set(packagesRaw))
-      const externalId = buildExternalId({
-        fileTag: args.sourceTag,
-        rowIndex: index,
+    normalizedRows.push({
+      external_id: externalId,
+      date: awardDate,
+      announced_at: awardDate,
+      supplier: suppliers.join(' / '),
+      operator,
+      project_name: subProject,
+      description: buildDescription({
         contractId,
-        awardDate,
-        subProject,
-        supplier,
         packages,
-      })
-
-      normalizedRows.push({
-        external_id: externalId,
-        date: awardDate,
-        announced_at: awardDate,
-        supplier,
-        operator,
-        project_name: subProject,
-        description: buildDescription({
-          contractId,
-          packages,
-          facilityCategory,
-          waterDepthCategory,
-          budget,
-          comment,
-        }),
-        contract_type: deriveContractType(packages),
-        region: continent,
-        country,
-        source: 'rystad_awards',
-        source_url: args.sourceTag,
-        pipeline_phase: 'awarded',
-      })
-    }
+        packageOwners,
+        facilityCategory,
+        waterDepthCategory,
+        budget,
+        comment,
+      }),
+      contract_type: deriveContractType(packages),
+      region: continent,
+      country,
+      source: 'rystad_awards',
+      source_url: args.sourceTag,
+      pipeline_phase: 'awarded',
+    })
   }
 
   const yearMap = new Map()
