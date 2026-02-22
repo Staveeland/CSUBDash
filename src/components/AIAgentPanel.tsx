@@ -45,11 +45,51 @@ type AgentApiResponse = {
   error?: unknown
 }
 
+type ThinkingMode = 'chat' | 'report'
+
+type ThinkingState = {
+  mode: ThinkingMode
+  focusText: string
+}
+
 const QUICK_PROMPTS = [
   'Lag en rapport for prosjektet Johan Sverdrup for 2024-2026 som PDF.',
   'Gi meg en årsrapport for alle prosjekter i 2025 med topp operatører.',
   'Hvilke land og operatører har høyest XMT-volum i databasen?',
 ]
+
+const GLOBE_NODE_YELLOW = '#ffd57a'
+const GLOBE_NODE_YELLOW_ACTIVE = '#ffe8b3'
+
+const THINKING_STEPS: Record<ThinkingMode, string[]> = {
+  chat: [
+    'Tolker spørsmålet og finner riktig analysemodus.',
+    'Henter relevante datapunkter fra CSUB-databasen.',
+    'Kryssjekker datadekning og validerer nøkkeltall.',
+    'Formulerer svar og forbereder oppfølgingsforslag.',
+  ],
+  report: [
+    'Tolker rapportforespørselen og avgrenser omfang.',
+    'Henter relevante prosjekter, land og operatører.',
+    'Bygger struktur for innsikt, funn og nøkkeltall.',
+    'Genererer rapportinnhold og ferdigstiller svaret.',
+  ],
+}
+
+const THINKING_DETAILS: Record<ThinkingMode, string[]> = {
+  chat: [
+    'Kalibrerer forespørselen mot historikken i denne samtalen.',
+    'Prioriterer de mest relevante datasettene først.',
+    'Vekter tallgrunnlag mot datadekning før svar.',
+    'Sikrer at svaret holder samme kontekst som spørsmålet.',
+  ],
+  report: [
+    'Bygger en disposisjon som passer rapportformatet.',
+    'Samler datapunkter som kan inngå i PDF-rapporten.',
+    'Syntetiserer funn til korte, tydelige konklusjoner.',
+    'Klargjør innholdet for videre eksport og deling.',
+  ],
+}
 
 function isoNow(): string {
   return new Date().toISOString()
@@ -77,6 +117,26 @@ function makeId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`
 }
 
+function detectThinkingMode(value: string): ThinkingMode {
+  const normalized = value.toLowerCase()
+  if (
+    normalized.includes('rapport') ||
+    normalized.includes('årsrapport') ||
+    normalized.includes('pdf') ||
+    normalized.includes('report')
+  ) {
+    return 'report'
+  }
+  return 'chat'
+}
+
+function toThinkingFocus(value: string): string {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  if (!normalized) return 'CSUB-datagrunnlaget'
+  if (normalized.length <= 90) return normalized
+  return `${normalized.slice(0, 87)}...`
+}
+
 export default function AIAgentPanel() {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -91,6 +151,8 @@ export default function AIAgentPanel() {
   ])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [thinkingState, setThinkingState] = useState<ThinkingState | null>(null)
+  const [thinkingElapsedSeconds, setThinkingElapsedSeconds] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -106,6 +168,35 @@ export default function AIAgentPanel() {
     if (!target) return
     target.scrollTo({ top: target.scrollHeight, behavior: 'smooth' })
   }, [messages, sending, open])
+
+  useEffect(() => {
+    if (!sending || !thinkingState) return
+    const timer = window.setInterval(() => {
+      setThinkingElapsedSeconds((current) => current + 1)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [sending, thinkingState])
+
+  const thinkingSteps = useMemo(
+    () => (thinkingState ? THINKING_STEPS[thinkingState.mode] : []),
+    [thinkingState]
+  )
+
+  const thinkingDetails = useMemo(
+    () => (thinkingState ? THINKING_DETAILS[thinkingState.mode] : []),
+    [thinkingState]
+  )
+
+  const activeThinkingStepIndex = thinkingSteps.length > 0
+    ? Math.min(Math.floor(thinkingElapsedSeconds / 2), thinkingSteps.length - 1)
+    : 0
+  const activeThinkingStep = thinkingSteps[activeThinkingStepIndex] ?? null
+  const activeThinkingDetail = thinkingDetails.length > 0
+    ? thinkingDetails[Math.floor(thinkingElapsedSeconds / 3) % thinkingDetails.length]
+    : null
+  const thinkingProgressPct = thinkingSteps.length > 0
+    ? Math.round(((activeThinkingStepIndex + 1) / thinkingSteps.length) * 100)
+    : 0
 
   const sendPrompt = useCallback(async (promptText: string, isFollowUp = false) => {
     const content = promptText.trim()
@@ -131,6 +222,11 @@ export default function AIAgentPanel() {
     setMessages((current) => [...current, userMessage])
     setInput('')
     setSending(true)
+    setThinkingState({
+      mode: detectThinkingMode(content),
+      focusText: toThinkingFocus(content),
+    })
+    setThinkingElapsedSeconds(0)
     setError(null)
 
     try {
@@ -201,6 +297,8 @@ export default function AIAgentPanel() {
       ])
     } finally {
       setSending(false)
+      setThinkingState(null)
+      setThinkingElapsedSeconds(0)
     }
   }, [conversationPayload, sending])
 
@@ -212,29 +310,61 @@ export default function AIAgentPanel() {
   return (
     <div className="fixed bottom-4 right-4 z-[260] flex flex-col items-end gap-3 pointer-events-none">
       {open && (
-        <section className="pointer-events-auto w-[min(460px,calc(100vw-1rem))] h-[min(82vh,760px)] bg-[var(--csub-dark)] rounded-xl border border-[var(--csub-light-soft)] shadow-[0_18px_40px_rgba(0,0,0,0.45)] flex flex-col overflow-hidden">
-          <div className="px-4 py-3 border-b border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.9)] flex items-start justify-between gap-3">
+        <section
+          className="pointer-events-auto w-[min(460px,calc(100vw-1rem))] h-[min(82vh,760px)] bg-[var(--csub-dark)] rounded-xl border flex flex-col overflow-hidden"
+          style={{
+            borderColor: GLOBE_NODE_YELLOW,
+            boxShadow: '0 18px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,232,179,0.2)',
+          }}
+        >
+          <div
+            className="px-4 py-3 border-b bg-[color:rgba(10,23,20,0.9)] flex items-start justify-between gap-3"
+            style={{ borderColor: 'rgba(255, 213, 122, 0.4)' }}
+          >
             <div>
               <h2 className="text-sm text-white">CSUB AI Agent</h2>
               <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Databasesok, analyser og PDF-rapporter</p>
             </div>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="text-xs rounded-md border border-[var(--csub-light-soft)] px-2 py-1 text-[var(--text-muted)] hover:text-white hover:border-[var(--csub-light)] cursor-pointer"
-            >
-              Lukk
-            </button>
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.12em]"
+                style={{
+                  borderColor: sending ? 'rgba(255, 213, 122, 0.55)' : 'var(--csub-light-soft)',
+                  color: sending ? GLOBE_NODE_YELLOW_ACTIVE : 'var(--text-muted)',
+                  backgroundColor: sending ? 'rgba(255, 213, 122, 0.08)' : 'rgba(10,23,20,0.45)',
+                }}
+              >
+                {sending && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#ffe8b3] opacity-80" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-[#ffd57a]" />
+                  </span>
+                )}
+                {sending ? 'AI jobber' : 'Klar'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="text-xs rounded-md border px-2 py-1 text-[var(--text-muted)] hover:text-white cursor-pointer"
+                style={{ borderColor: 'rgba(255, 213, 122, 0.45)' }}
+              >
+                Lukk
+              </button>
+            </div>
           </div>
 
-          <div className="px-3 py-2 border-b border-[var(--csub-light-faint)] grid grid-cols-1 gap-1.5">
+          <div
+            className="px-3 py-2 border-b grid grid-cols-1 gap-1.5"
+            style={{ borderColor: 'rgba(255, 213, 122, 0.18)' }}
+          >
             {QUICK_PROMPTS.map((prompt) => (
               <button
                 key={prompt}
                 type="button"
                 onClick={() => void sendPrompt(prompt)}
                 disabled={sending}
-                className="text-left rounded-md border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.45)] px-2.5 py-1.5 text-[11px] text-[var(--text-muted)] hover:text-white hover:border-[var(--csub-gold-soft)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-left rounded-md border bg-[color:rgba(10,23,20,0.45)] px-2.5 py-1.5 text-[11px] text-[var(--text-muted)] hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ borderColor: 'rgba(255, 213, 122, 0.22)' }}
               >
                 {prompt}
               </button>
@@ -244,7 +374,8 @@ export default function AIAgentPanel() {
           <div className="flex-1 min-h-0 px-3 py-3 flex flex-col gap-3">
             <div
               ref={listRef}
-              className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(10,23,20,0.35)] p-2.5 flex-1 overflow-y-auto"
+              className="rounded-lg border bg-[color:rgba(10,23,20,0.35)] p-2.5 flex-1 overflow-y-auto"
+              style={{ borderColor: 'rgba(255, 213, 122, 0.2)' }}
             >
               <div className="space-y-2.5">
                 {messages.map((message) => (
@@ -296,8 +427,49 @@ export default function AIAgentPanel() {
                 ))}
 
                 {sending && (
-                  <div className="rounded-lg border border-[var(--csub-light-soft)] bg-[color:rgba(77,184,158,0.08)] px-2.5 py-2 text-xs text-[var(--text-muted)] animate-pulse">
-                    AI-agent jobber med databasen og skriver svar...
+                  <div
+                    className="rounded-lg border px-2.5 py-2.5 text-xs"
+                    style={{
+                      borderColor: GLOBE_NODE_YELLOW,
+                      background: 'linear-gradient(135deg, rgba(255, 213, 122, 0.12), rgba(10, 23, 20, 0.62))',
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex items-center gap-1.5">
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#ffe8b3] opacity-85" />
+                          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#ffd57a]" />
+                        </span>
+                        <span className="text-[10px] uppercase tracking-[0.14em] text-[#ffd57a]">LLM tenker</span>
+                      </div>
+                      <span className="text-[10px] text-[var(--text-muted)]">{thinkingElapsedSeconds}s</span>
+                    </div>
+
+                    {thinkingState && (
+                      <p className="mt-1 text-[11px] leading-snug text-white">
+                        Fokus: <span style={{ color: GLOBE_NODE_YELLOW_ACTIVE }}>{thinkingState.focusText}</span>
+                      </p>
+                    )}
+                    {activeThinkingStep && (
+                      <p className="mt-1 text-[11px] leading-snug text-white/95">
+                        Nå: {activeThinkingStep}
+                      </p>
+                    )}
+                    {activeThinkingDetail && (
+                      <p className="mt-0.5 text-[10px] leading-snug text-[var(--text-muted)]">
+                        Detalj: {activeThinkingDetail}
+                      </p>
+                    )}
+
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[rgba(255,213,122,0.2)]">
+                      <div
+                        className="h-full rounded-full transition-[width] duration-500"
+                        style={{
+                          width: `${Math.max(14, thinkingProgressPct)}%`,
+                          background: 'linear-gradient(90deg, #ffd57a, #ffe8b3)',
+                        }}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
@@ -318,7 +490,7 @@ export default function AIAgentPanel() {
                   disabled={sending || !input.trim()}
                   className="rounded-md border border-[var(--csub-light-soft)] bg-[color:rgba(77,184,158,0.14)] px-2.5 py-1.5 text-[11px] text-white hover:border-[var(--csub-light)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  {sending ? 'Sender...' : 'Send'}
+                  {sending ? 'AI jobber...' : 'Send'}
                 </button>
               </div>
               {error && <p className="text-[11px] text-red-300">{error}</p>}
@@ -331,7 +503,8 @@ export default function AIAgentPanel() {
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="pointer-events-auto rounded-full border border-[var(--csub-gold-soft)] bg-[color:rgba(10,23,20,0.95)] px-4 py-3 text-xs text-white shadow-[0_12px_24px_rgba(0,0,0,0.45)] hover:border-[var(--csub-light)] transition-colors cursor-pointer"
+        className="pointer-events-auto rounded-full border bg-[color:rgba(10,23,20,0.95)] px-4 py-3 text-xs text-white shadow-[0_12px_24px_rgba(0,0,0,0.45)] transition-colors cursor-pointer"
+        style={{ borderColor: GLOBE_NODE_YELLOW }}
       >
         {open ? 'Skjul AI Agent' : 'AI Agent'}
       </button>
