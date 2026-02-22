@@ -91,6 +91,8 @@ const THINKING_DETAILS: Record<ThinkingMode, string[]> = {
   ],
 }
 
+const THINKING_STEP_DURATION_SECONDS = 4
+
 function isoNow(): string {
   return new Date().toISOString()
 }
@@ -188,18 +190,14 @@ export default function AIAgentPanel() {
   )
 
   const activeThinkingStepIndex = thinkingSteps.length > 0
-    ? Math.floor(thinkingElapsedSeconds / 2) % thinkingSteps.length
+    ? Math.min(Math.floor(thinkingElapsedSeconds / THINKING_STEP_DURATION_SECONDS), thinkingSteps.length - 1)
     : 0
-  const activeThinkingStep = thinkingSteps[activeThinkingStepIndex] ?? null
-  const nextThinkingStep = thinkingSteps.length > 1
-    ? thinkingSteps[(activeThinkingStepIndex + 1) % thinkingSteps.length]
+  const nextThinkingStepIndex = activeThinkingStepIndex < thinkingSteps.length - 1
+    ? activeThinkingStepIndex + 1
     : null
   const activeThinkingDetail = thinkingDetails.length > 0
-    ? thinkingDetails[Math.floor(thinkingElapsedSeconds / 3) % thinkingDetails.length]
+    ? thinkingDetails[Math.min(activeThinkingStepIndex, thinkingDetails.length - 1)]
     : null
-  const thinkingSweep = thinkingSteps.length > 0
-    ? Math.floor(thinkingElapsedSeconds / Math.max(2, thinkingSteps.length * 2)) + 1
-    : 1
   const thinkingSuffix = '.'.repeat((thinkingElapsedSeconds % 3) + 1)
 
   const sendPrompt = useCallback(async (promptText: string, isFollowUp = false) => {
@@ -454,33 +452,69 @@ export default function AIAgentPanel() {
                         Fokus: <span style={{ color: GLOBE_NODE_YELLOW_ACTIVE }}>{thinkingState.focusText}</span>
                       </p>
                     )}
-                    {activeThinkingStep && (
-                      <p className="mt-1 text-[11px] leading-snug text-white/95">
-                        Nå: {activeThinkingStep}
-                      </p>
-                    )}
-                    {activeThinkingDetail && (
-                      <p className="mt-0.5 text-[10px] leading-snug text-[var(--text-muted)]">
-                        Detalj: {activeThinkingDetail}
-                      </p>
-                    )}
 
                     <div className="mt-2 rounded-md border border-[rgba(255,213,122,0.28)] bg-[rgba(10,23,20,0.45)] px-2 py-1.5">
                       <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                        Arbeidssyklus #{thinkingSweep}
+                        Arbeidsflyt
                       </div>
-                      {activeThinkingStep && (
-                        <div className="mt-1 flex items-start gap-1.5">
-                          <span className="mt-1 inline-flex h-1.5 w-1.5 rounded-full bg-[#ffe8b3] animate-pulse" />
-                          <p className="text-[10px] leading-snug text-white/95">Aktiv nå: {activeThinkingStep}</p>
-                        </div>
-                      )}
-                      {nextThinkingStep && (
-                        <div className="mt-1 flex items-start gap-1.5">
-                          <span className="mt-1 inline-flex h-1.5 w-1.5 rounded-full border border-[rgba(255,213,122,0.75)]" />
-                          <p className="text-[10px] leading-snug text-[var(--text-muted)]">Neste: {nextThinkingStep}</p>
-                        </div>
-                      )}
+                      <div className="mt-1.5 flex flex-col gap-1.5">
+                        {thinkingSteps.map((step, index) => {
+                          const isCompleted = index < activeThinkingStepIndex
+                          const isActive = index === activeThinkingStepIndex
+                          const isNext = nextThinkingStepIndex !== null && index === nextThinkingStepIndex
+
+                          return (
+                            <div
+                              key={`${thinkingState?.mode ?? 'mode'}-step-${index}`}
+                              className="rounded-sm border px-1.5 py-1"
+                              style={{
+                                borderColor: isActive ? 'rgba(255,213,122,0.7)' : 'rgba(255,213,122,0.18)',
+                                backgroundColor: isActive ? 'rgba(255,213,122,0.1)' : 'rgba(10,23,20,0.35)',
+                              }}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-start gap-1.5">
+                                  {isCompleted ? (
+                                    <span className="mt-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#ffd57a] text-[9px] font-semibold text-[#0a1714]">
+                                      ✓
+                                    </span>
+                                  ) : isActive ? (
+                                    <span className="mt-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-[#ffe8b3]">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-[#ffe8b3] animate-pulse" />
+                                    </span>
+                                  ) : (
+                                    <span className="mt-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-[rgba(255,213,122,0.45)] text-[9px] text-[var(--text-muted)]">
+                                      {index + 1}
+                                    </span>
+                                  )}
+
+                                  <div>
+                                    <p className={`text-[10px] leading-snug ${isCompleted || isActive ? 'text-white' : 'text-[var(--text-muted)]'}`}>
+                                      {step}
+                                    </p>
+                                    {isActive && activeThinkingDetail && (
+                                      <p className="mt-0.5 text-[10px] leading-snug text-[var(--text-muted)]">
+                                        Detalj: {activeThinkingDetail}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {isNext && (
+                                  <span className="rounded-full border border-[rgba(255,213,122,0.45)] px-1.5 py-0.5 text-[8px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                                    Neste
+                                  </span>
+                                )}
+                                {isActive && (
+                                  <span className="rounded-full border border-[rgba(255,232,179,0.5)] px-1.5 py-0.5 text-[8px] uppercase tracking-[0.08em] text-[#ffe8b3]">
+                                    Aktiv
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                   </div>
                 )}
